@@ -213,11 +213,29 @@ function onboarding() {
 // ---------- HOME ----------
 async function home(q) {
   const since = startOfToday();
-  const [meals, acts, streak] = await Promise.all([
+  const wk0 = new Date(); wk0.setHours(0, 0, 0, 0); wk0.setDate(wk0.getDate() - 6);
+  const [meals, acts, streak, wkMeals, wkActs, chs] = await Promise.all([
     sb.from("meals").select("*").gte("eaten_at", since).order("eaten_at"),
     sb.from("activities").select("*").gte("started_at", since).order("started_at"),
     rpc("my_streak"),
+    sb.from("meals").select("kcal,eaten_at").gte("eaten_at", wk0.toISOString()),
+    sb.from("activities").select("kcal,distance_km,kind,started_at").gte("started_at", wk0.toISOString()),
+    sb.from("challenges").select("id,name,metric,ends_at,official").gt("ends_at", new Date().toISOString()).order("ends_at").limit(5),
   ]);
+  // this week, per day
+  const days = [...Array(7)].map((_, i) => { const d = new Date(wk0); d.setDate(d.getDate() + i); return { d, eat: 0, burn: 0 }; });
+  const dayIdx = (iso) => Math.floor((new Date(iso) - wk0) / 864e5);
+  (wkMeals.data || []).forEach((m) => { const i = dayIdx(m.eaten_at); if (days[i]) days[i].eat += m.kcal; });
+  (wkActs.data || []).forEach((a) => { const i = dayIdx(a.started_at); if (days[i]) days[i].burn += a.kcal; });
+  const wkKm = (wkActs.data || []).filter((a) => a.kind === "run").reduce((t, a) => t + Number(a.distance_km), 0);
+  const onTarget = days.filter((x) => x.eat > 0 && x.eat - x.burn <= profile.budget_kcal).length;
+  // my live challenge: the first one I am in
+  let myCh = null;
+  for (const c of chs.data || []) {
+    const rows = await rpc("challenge_leaderboard", { cid: c.id }).catch(() => []);
+    const i = rows.findIndex((x) => x.user_id === user.id);
+    if (i >= 0) { myCh = { c, rank: i + 1, of: rows.length, score: rows[i].score, lead: rows[0] }; break; }
+  }
   if (meals.error) throw meals.error;
   if (acts.error) throw acts.error;
   const eaten = meals.data.reduce((s, m) => s + m.kcal, 0);
@@ -252,20 +270,42 @@ async function home(q) {
   </section>
   ${left < 0 ? `<div class="card"><p><b class="danger">≈ ${n0(-left / 7.7)} g fat</b> if you don’t burn the extra ${n0(-left)} kcal.</p><p class="muted">Run ${n1(burnFor(-left).runKm)} km or walk ${n1(burnFor(-left).walkKm)} km to balance today.</p></div>` : ""}
 
+  <div class="grid g2">
+    <a class="quick" href="#snap"><span class="q-ic" style="background:var(--tint-snack)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4h-5L7.5 6.5H4a1 1 0 0 0-1 1V19a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V7.5a1 1 0 0 0-1-1h-3.5z"/><circle cx="12" cy="13" r="3.5"/></svg></span><span><b>Snap a meal</b><span class="muted">Photo → kcal</span></span></a>
+    <button class="quick" id="quickBurn"><span class="q-ic" style="background:var(--tint-burn)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3 0-3 0-5 1-8.5z"/></svg></span><span><b>Log a burn</b><span class="muted">Run, walk…</span></span></button>
+  </div>
+
   <div class="row"><h2>Snacks today</h2><a class="btn outline small" href="#snap">+ Add</a></div>
   ${meals.data.length ? `<div class="list">${meals.data.map((m) => `
     <div class="row"><div><div>${esc(m.name)}</div><div class="muted">${time(m.eaten_at)}</div></div>
     <div class="row"><b>${n0(m.kcal)}</b><button class="icon-btn" data-del-meal="${m.id}" aria-label="Remove ${esc(m.name)}"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
-    : `<p class="muted">Nothing yet. Tap Snap to photograph your meal.</p>`}
+    : `<a class="empty" href="#snap"><span>No meals yet today</span><b>Snap one →</b></a>`}
 
   <div class="row"><h2>Burns today</h2><button class="primary small" id="showLog">+ Log a burn</button></div>
   ${acts.data.length ? `<div class="list" style="background:var(--tint-burn)">${acts.data.map((a) => `
     <div class="row"><div class="row" style="justify-content:flex-start;gap:12px"><span class="act-ic">${ACT[a.kind].icon}</span><div><div>${esc(ACT[a.kind].label)}${a.distance_km ? ` · ${n1(a.distance_km)} km` : ""}${a.minutes ? ` · ${a.minutes} min` : ""}</div><div class="muted">${time(a.started_at)} · ${esc(a.source)}</div></div></div>
     <div class="row"><b class="danger">−${n0(a.kcal)}</b><button class="icon-btn" data-del-act="${a.id}" aria-label="Remove activity"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
-    : `<p class="muted">No burns yet today.</p>`}
+    : `<button class="empty" id="emptyBurn"><span>No burns yet today</span><b>Log one →</b></button>`}
+
+  <section class="card stack" aria-label="This week">
+    <div class="row"><b>This week</b><span class="muted">${onTarget}/7 days on budget · ${n1(wkKm)} km run</span></div>
+    <div class="week" role="img" aria-label="Calories eaten and burned over the last 7 days">
+      ${days.map((x) => { const max = Math.max(profile.budget_kcal * 1.3, ...days.map((y) => y.eat)); const net = x.eat - x.burn; const over = net > profile.budget_kcal;
+        return `<div class="wcol"><div class="wbar"><span class="weat" style="height:${(x.eat / max) * 100}%;background:${over ? "var(--burn)" : "var(--snack)"}"></span><span class="wburn" style="height:${(x.burn / max) * 100}%"></span><i style="bottom:${(profile.budget_kcal / max) * 100}%"></i></div><span class="muted">${x.d.toLocaleDateString("en-GB", { weekday: "narrow" })}</span></div>`; }).join("")}
+    </div>
+    <div class="row muted" style="justify-content:flex-start;gap:14px;font-size:12px"><span><span class="dot" style="background:var(--snack);display:inline-block"></span> Eaten</span><span><span class="dot" style="background:#FF6A4D;display:inline-block"></span> Burned</span><span>— Budget</span></div>
+  </section>
+
+  ${myCh ? `<a class="card row" href="#challenges" style="text-decoration:none;color:inherit">
+      <div><div class="muted">${myCh.c.official ? "Official event" : "Your challenge"} · ends in ${Math.max(0, Math.ceil((new Date(myCh.c.ends_at) - Date.now()) / 864e5))} days</div><b>${esc(myCh.c.name)}</b>
+      <div class="muted">${myCh.rank === 1 ? "You’re leading!" : `${myCh.c.metric === "km" ? n1(myCh.lead.score - myCh.score) + " km" : n0(myCh.lead.score - myCh.score) + " kcal"} behind ${esc(myCh.lead.display_name)}`}</div></div>
+      <span class="rank">#${myCh.rank}<small>/${myCh.of}</small></span></a>`
+    : `<a class="card row" href="#challenges" style="text-decoration:none;color:inherit"><div><b>Race a friend</b><div class="muted">Start a weekly km or kcal challenge</div></div><span class="rank" style="font-size:22px">→</span></a>`}
   ${quip(["Every snack has a price. It’s paid in kilometres.", "Your shoes miss you.", "Balance is a verb. Go do it."])}`;
 
   $("#showLog").onclick = () => openBurnSheet();
+  $("#quickBurn").onclick = () => openBurnSheet();
+  const eb = $("#emptyBurn"); if (eb) eb.onclick = () => openBurnSheet();
   if (q.get("log")) { history.replaceState(null, "", "#home"); openBurnSheet({ kind: "run", km: +q.get("km") || 0 }); }
   $$("[data-del-meal]").forEach((b) => (b.onclick = async () => { await sb.from("meals").delete().eq("id", b.dataset.delMeal); route(); }));
   $$("[data-del-act]").forEach((b) => (b.onclick = async () => { await sb.from("activities").delete().eq("id", b.dataset.delAct); route(); }));
