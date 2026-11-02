@@ -283,7 +283,7 @@ async function home(q) {
 
   <div class="row"><h2>Burns today</h2><button class="primary small" id="showLog">+ Log a burn</button></div>
   ${acts.data.length ? `<div class="list" style="background:var(--tint-burn)">${acts.data.map((a) => `
-    <div class="row"><div class="row" style="justify-content:flex-start;gap:12px"><span class="act-ic">${ACT[a.kind].icon}</span><div><div>${esc(ACT[a.kind].label)}${a.distance_km ? ` · ${n1(a.distance_km)} km` : ""}${a.minutes ? ` · ${a.minutes} min` : ""}</div><div class="muted">${time(a.started_at)} · ${esc(a.source)}</div></div></div>
+    <div class="row"><div class="row" style="justify-content:flex-start;gap:12px"><span class="act-ic">${ACT[a.steps > 0 ? "steps" : a.kind].icon}</span><div><div>${a.steps > 0 ? `${n0(a.steps)} steps` : esc(ACT[a.kind].label)}${a.distance_km ? ` · ${n1(a.distance_km)} km` : ""}${a.minutes ? ` · ${a.minutes} min` : ""}</div><div class="muted">${time(a.started_at)} · ${esc(a.source)}</div></div></div>
     <div class="row"><b class="danger">−${n0(a.kcal)}</b><button class="icon-btn" data-del-act="${a.id}" aria-label="Remove activity"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
     : `<button class="empty" id="emptyBurn"><span>No burns yet today</span><b>Log one →</b></button>`}
 
@@ -314,20 +314,23 @@ async function home(q) {
 // ---------- LOG A BURN (bottom sheet) ----------
 const sv = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
 const ACT = {
+  steps: { label: "Steps",     by: "steps", met: null, icon: sv('<path d="M7 15c-1.5 0-2.5-1.5-2.5-4S5.5 5 7.5 5 10 7 10 9.5 9 15 7 15zM5 18h4M17 19c-2 0-3-5.5-3-8S15 5 16.5 5 19.5 6.5 19.5 9s-1 4-2.5 4M15 22h4"/>') },
   run:   { label: "Run",       by: "km",  met: null, icon: sv('<circle cx="14" cy="4.5" r="2"/><path d="M8 21l3-6 3 3v4M6 12l3-4 4 1 3 4 3 1M11 15l-1-4"/>') },
   walk:  { label: "Walk",      by: "km",  met: null, icon: sv('<circle cx="12" cy="4.5" r="2"/><path d="M10 21l2-7 3 3v4M8 12l2-4h3l2 4M12 14v-6"/>') },
   rope:  { label: "Jump rope", by: "min", met: 12,   icon: sv('<path d="M5 4v6M19 4v6M5 10c0 8 14 8 14 0"/><circle cx="12" cy="6" r="2"/>') },
   cycle: { label: "Cycle",     by: "min", met: 7,    icon: sv('<circle cx="6" cy="17" r="3.5"/><circle cx="18" cy="17" r="3.5"/><path d="M6 17l4-8h5l3 8M10 9l2 8M14 5h2"/>') },
   other: { label: "Workout",   by: "min", met: 6,    icon: sv('<path d="M3 10v4M6 8v8M18 8v8M21 10v4M6 12h12"/>') },
 };
-const PRESETS = { km: [2, 3, 5, 10], min: [15, 30, 45, 60] };
+const PRESETS = { km: [2, 3, 5, 10], min: [15, 30, 45, 60], steps: [3000, 5000, 8000, 10000] };
+const stepsKm = (n) => (n * (Number(profile?.height_cm) || 170) * 0.00414) / 1000;
 
 function openBurnSheet(init = {}) {
-  const st = { kind: init.kind || localStorage.getItem("snb_last_kind") || "run", km: init.km || 0, min: 0, kcal: null, when: "" };
+  const st = { kind: init.kind || localStorage.getItem("snb_last_kind") || "run", km: init.km || 0, min: 0, steps: 0, kcal: null, when: "" };
   const w = weight();
   const calc = () => {
     if (st.kcal != null) return st.kcal;
     const a = ACT[st.kind];
+    if (st.kind === "steps") return Math.round(stepsKm(st.steps) * 0.5 * w);
     if (st.kind === "run") return Math.round(st.km * w);
     if (st.kind === "walk") return Math.round(st.km * 0.5 * w);
     return Math.round((st.min * a.met * w) / 60);
@@ -340,8 +343,8 @@ function openBurnSheet(init = {}) {
 
   const render = () => {
     const a = ACT[st.kind];
-    const main = a.by === "km" ? "km" : "min";
-    const val = main === "km" ? st.km : st.min;
+    const main = a.by;
+    const val = main === "km" ? st.km : main === "steps" ? st.steps : st.min;
     const k = calc();
     const pace = st.kind === "run" && st.km > 0 && st.min > 0 ? (() => { const p = st.min / st.km; return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, "0")} /km`; })() : "";
     wrap.innerHTML = `
@@ -354,13 +357,13 @@ function openBurnSheet(init = {}) {
       </div>
 
       <div class="card stack">
-        <div class="row"><b>${main === "km" ? "Distance" : "Duration"}</b><span class="muted">${main === "km" ? "kilometres" : "minutes"}</span></div>
+        <div class="row"><b>${{ km: "Distance", min: "Duration", steps: "Steps today" }[main]}</b><span class="muted">${main === "steps" && st.steps ? `≈ ${n1(stepsKm(st.steps))} km` : { km: "kilometres", min: "minutes", steps: "from your Health app" }[main]}</span></div>
         <div class="stepper">
           <button type="button" class="step-btn" data-step="-1" aria-label="Less">${sv('<path d="M5 12h14"/>')}</button>
-          <input id="mainVal" type="number" inputmode="decimal" min="0" step="${main === "km" ? 0.1 : 1}" value="${val || ""}" placeholder="0" aria-label="${main === "km" ? "Distance in km" : "Minutes"}">
+          <input id="mainVal" type="number" inputmode="decimal" min="0" step="${main === "km" ? 0.1 : 1}" value="${val || ""}" placeholder="0" aria-label="${{ km: "Distance in km", min: "Minutes", steps: "Steps" }[main]}">
           <button type="button" class="step-btn" data-step="1" aria-label="More">${sv('<path d="M12 5v14M5 12h14"/>')}</button>
         </div>
-        <div class="chips" style="justify-content:space-between">${PRESETS[main].map((v) => `<button type="button" class="chip${v === val ? " on" : ""}" data-preset="${v}">${v} ${main}</button>`).join("")}</div>
+        <div class="chips" style="justify-content:space-between">${PRESETS[main].map((v) => `<button type="button" class="chip${v === val ? " on" : ""}" data-preset="${v}">${main === "steps" ? (v / 1000) + "k" : v + " " + main}</button>`).join("")}</div>
         ${main === "km" ? `<label>Time taken (optional, minutes)<input id="minVal" type="number" inputmode="numeric" min="0" value="${st.min || ""}" placeholder="e.g. 30"></label>` : ""}
       </div>
 
@@ -371,20 +374,21 @@ function openBurnSheet(init = {}) {
       </div>
       ${st.kcal != null ? `<label>kcal from your watch<input id="kVal" type="number" inputmode="numeric" min="1" value="${st.kcal || ""}"></label>` : ""}
 
-      <label>When<input id="whenVal" type="time" value="${st.when || new Date().toTimeString().slice(0, 5)}"></label>
+      ${main === "steps" ? `<p class="muted">Steps replace today’s step total. Set up auto sync in Profile → Step sync.</p>` : `<label>When<input id="whenVal" type="time" value="${st.when || new Date().toTimeString().slice(0, 5)}"></label>`}
       <button class="primary block" id="saveBurn" ${k ? "" : "disabled"}>Save ${k ? n0(k) + " kcal burn" : "burn"}</button>
     </div>`;
 
     wrap.querySelector("#closeSheet").onclick = close;
     wrap.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { st.kind = b.dataset.kind; st.kcal = null; render(); }));
     const mv = wrap.querySelector("#mainVal");
-    const setMain = (v) => { v = Math.max(0, Math.round(v * 10) / 10); if (main === "km") st.km = v; else st.min = Math.round(v); };
+    const val0 = () => (main === "km" ? st.km : main === "steps" ? st.steps : st.min);
+    const setMain = (v) => { v = Math.max(0, Math.round(v * 10) / 10); if (main === "km") st.km = v; else if (main === "steps") st.steps = Math.round(v); else st.min = Math.round(v); };
     mv.oninput = () => { setMain(+mv.value || 0); refresh(); };
-    wrap.querySelectorAll("[data-step]").forEach((b) => (b.onclick = () => { setMain((main === "km" ? st.km : st.min) + (+b.dataset.step) * (main === "km" ? 0.5 : 5)); render(); }));
+    wrap.querySelectorAll("[data-step]").forEach((b) => (b.onclick = () => { setMain(val0() + (+b.dataset.step) * ({ km: 0.5, min: 5, steps: 500 }[main])); render(); }));
     wrap.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => { setMain(+b.dataset.preset); render(); }));
     const mn = wrap.querySelector("#minVal"); if (mn) mn.oninput = () => { st.min = +mn.value || 0; refresh(); };
     const kv = wrap.querySelector("#kVal"); if (kv) kv.oninput = () => { st.kcal = +kv.value || 0; refresh(); };
-    wrap.querySelector("#whenVal").onchange = (e) => { st.when = e.target.value; };
+    const wv = wrap.querySelector("#whenVal"); if (wv) wv.onchange = (e) => { st.when = e.target.value; };
     wrap.querySelector("#editK").onclick = () => { st.kcal = st.kcal != null ? null : calc(); render(); wrap.querySelector("#kVal")?.focus(); };
     wrap.querySelector("#saveBurn").onclick = save;
   };
@@ -395,12 +399,20 @@ function openBurnSheet(init = {}) {
     const btn = wrap.querySelector("#saveBurn"); btn.disabled = !k; btn.textContent = `Save ${k ? n0(k) + " kcal burn" : "burn"}`;
     const sub = wrap.querySelector(".burn-total .muted:last-child");
     if (sub) sub.textContent = k ? `≈ ${n1(k / 7.7)} g of fat` : "Pick a distance or time";
-    wrap.querySelectorAll("[data-preset]").forEach((c) => c.classList.toggle("on", +c.dataset.preset === (ACT[st.kind].by === "km" ? st.km : st.min)));
+    wrap.querySelectorAll("[data-preset]").forEach((c) => c.classList.toggle("on", +c.dataset.preset === ({ km: st.km, min: st.min, steps: st.steps }[ACT[st.kind].by])));
   };
   const save = async () => {
     const k = calc(); if (!k) return;
     const btn = wrap.querySelector("#saveBurn"); btn.disabled = true; btn.textContent = "Saving…";
-    const when = new Date(); const t = wrap.querySelector("#whenVal").value;
+    if (st.kind === "steps") {
+      try {
+        const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+        await rpc("record_steps", { p_token: null, p_steps: st.steps, p_day: today, p_source: "manual" });
+      } catch (err) { btn.disabled = false; return fail(err); }
+      localStorage.setItem("snb_last_kind", "steps"); close();
+      toast(`${n0(st.steps)} steps saved`); location.hash = "#home"; return route();
+    }
+    const when = new Date(); const t = wrap.querySelector("#whenVal")?.value;
     if (t) { const [h, m] = t.split(":"); when.setHours(+h, +m, 0, 0); }
     const { error } = await sb.from("activities").insert({ kind: st.kind, distance_km: ACT[st.kind].by === "km" ? st.km : 0, minutes: st.min || 0, kcal: k, started_at: when.toISOString() });
     if (error) { btn.disabled = false; return fail(error); }
@@ -737,10 +749,13 @@ async function profileView() {
       <div class="row"><div><div>Show me nearby</div><div class="muted">${{ everyone: "Everyone within 2 km", friends: "Friends only", off: "Hidden" }[profile.visibility]}</div></div>
         <a class="btn outline small" href="#friends" id="toNearby">Change</a></div>
     </div>
-    <h2>Connected devices</h2>
-    <div class="card stack">
-      <p><b>Apple Health, Apple Watch &amp; Garmin</b></p>
-      <p class="muted">Web apps can’t read Apple Health directly. Automatic sync arrives with the native iOS app. For now, log runs from Home in a few taps.</p>
+    <h2>Step sync</h2>
+    <div class="card stack" id="stepSync">
+      <p><b>Apple Health, Apple Watch &amp; Garmin steps</b></p>
+      <p class="muted">An Apple Shortcut sends today’s steps to Snack &amp; Burn automatically. Garmin steps work too, through Apple Health.</p>
+      <div class="row" id="syncStatus"><span class="muted">Loading…</span></div>
+      <button class="primary block" id="showSync">Set up step sync</button>
+      <div id="syncGuide" class="stack" hidden></div>
     </div>
     ${profile.is_admin ? `<a class="btn primary block" href="#admin">Open Admin</a>` : ""}
     <h2>Password</h2>
@@ -753,6 +768,37 @@ async function profileView() {
     <button class="outline block" id="howInstall">How to add to Home Screen</button>
     <p class="version">Snack &amp; Burn · version ${esc(APP_VERSION)}</p>`;
   $("#howInstall").onclick = () => showInstallGuide(true);
+  const { data: tok } = await sb.from("step_tokens").select("last_sync").maybeSingle();
+  $("#syncStatus").innerHTML = tok?.last_sync
+    ? `<span class="ok">Connected</span><span class="muted">Last sync ${new Date(tok.last_sync).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>`
+    : `<span class="muted">Not set up yet</span>`;
+  $("#showSync").onclick = async () => {
+    const g = $("#syncGuide");
+    if (!g.hidden) { g.hidden = true; return; }
+    let code;
+    try { code = await rpc("my_step_token", { regenerate: false }); } catch (e) { return fail(e); }
+    const url = `${cfg.SUPABASE_URL}/functions/v1/sync-steps`;
+    g.innerHTML = `
+      <div class="step"><span class="num">1</span><div>Copy your two values (keep the code private):
+        <div class="stack" style="margin-top:8px">
+          <button class="outline small" data-copy="${esc(url)}">Copy web address</button>
+          <button class="outline small" data-copy="${esc(code)}">Copy sync code</button>
+        </div></div></div>
+      <div class="step"><span class="num">2</span><div>Open <b>Shortcuts</b> → <b>+</b> → name it <b>Snack &amp; Burn steps</b>.</div></div>
+      <div class="step"><span class="num">3</span><div>Add action <b>Find Health Samples</b>: Type <b>Steps</b>, Start Date <b>is today</b>.</div></div>
+      <div class="step"><span class="num">4</span><div>Add action <b>Calculate Statistics</b>: <b>Sum</b> of Health Samples.</div></div>
+      <div class="step"><span class="num">5</span><div>Add action <b>Get Contents of URL</b>: paste the web address. Tap ▸ Show More: Method <b>POST</b>, Request Body <b>JSON</b>, add fields:<br>
+        <span class="kbd">code</span> = your sync code (Text)<br><span class="kbd">steps</span> = <b>Statistics</b> (Number)</div></div>
+      <div class="step"><span class="num">6</span><div>Tap ▶ to test. Allow Health access when asked. You should see “steps saved”.</div></div>
+      <div class="step"><span class="num">7</span><div><b>Make it automatic:</b> Shortcuts → <b>Automation</b> → <b>+</b> → <b>Time of Day</b> (e.g. 21:00, Daily) → <b>Run Immediately</b> → pick this shortcut. Add a second one for when you open Snack &amp; Burn if you like.</div></div>
+      <button class="outline small danger" id="newCode">Make a new code (old one stops working)</button>`;
+    g.hidden = false;
+    g.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied"); }));
+    g.querySelector("#newCode").onclick = async () => {
+      if (!confirm("Make a new sync code? You’ll need to paste it into your Shortcut again.")) return;
+      try { await rpc("my_step_token", { regenerate: true }); g.hidden = true; $("#showSync").click(); toast("New code ready"); } catch (e) { fail(e); }
+    };
+  };
   const pw = $("#pw");
   pw.onsubmit = async (e) => {
     e.preventDefault();

@@ -105,8 +105,8 @@ nav#tabs[hidden] { display: none; }
 
 /* ---- Log a burn sheet ---- */
 .sheet { max-height: 92vh; overflow-y: auto; }
-.act-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
-.act-tile { flex-direction: column; gap: 6px; min-height: 76px; padding: 8px 2px; border-radius: 16px; background: #fff; border: 2px solid #E8D9C2; color: var(--ink); font-size: 12px; font-weight: 600; }
+.act-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.act-tile { flex-direction: column; gap: 4px; min-height: 64px; padding: 8px 2px; border-radius: 16px; background: #fff; border: 2px solid #E8D9C2; color: var(--ink); font-size: 12px; font-weight: 600; }
 .act-tile[aria-checked="true"] { background: var(--ink); border-color: var(--ink); color: var(--snack); }
 .act-ic { width: 40px; height: 40px; border-radius: 50%; background: #fff; color: var(--burn-ink); display: flex; align-items: center; justify-content: center; flex: none; }
 .stepper { display: grid; grid-template-columns: 56px 1fr 56px; gap: 10px; align-items: center; }
