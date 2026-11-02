@@ -66,7 +66,7 @@ async function loadDishes(force) {
 }
 
 // ---------- routing ----------
-const VIEWS = { home, snap, challenges, friends, profileView, admin };
+const VIEWS = { home, snap, challenges, friends, profileView, admin, coach, badges: badgesView };
 let snapState = null;
 
 async function route() {
@@ -280,6 +280,12 @@ async function home(q) {
     <button class="quick" id="quickBurn"><span class="q-ic" style="background:var(--tint-burn)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3 0-3 0-5 1-8.5z"/></svg></span><span><b>Log a burn</b><span class="muted">Run, walk…</span></span></button>
   </div>
 
+  <a class="coach-card" href="#coach">
+    <span class="coach-av" aria-hidden="true">${COACH_FACE}</span>
+    <span style="min-width:0;flex:1"><b>Coach</b><span class="muted coach-tip" id="coachTip">Your weekly check-in is ready. Tap to read.</span></span>
+    ${sv('<path d="M9 6l6 6-6 6"/>')}
+  </a>
+
   <div class="row"><h2>Snacks today</h2><a class="btn outline small" href="#snap">+ Add</a></div>
   ${meals.data.length ? `<div class="list">${meals.data.map((m) => `
     <div class="row"><div><div>${esc(m.name)}</div><div class="muted">${time(m.eaten_at)}</div></div>
@@ -316,6 +322,8 @@ async function home(q) {
   const ss = $("#syncSteps");
   if (ss) ss.onclick = () => runStepShortcut();
   const eb = $("#emptyBurn"); if (eb) eb.onclick = () => openBurnSheet();
+  loadCoachTip();
+  checkBadges();
   if (q.get("log")) { history.replaceState(null, "", "#home"); openBurnSheet({ kind: "run", km: +q.get("km") || 0 }); }
   $$("[data-del-meal]").forEach((b) => (b.onclick = async () => { await sb.from("meals").delete().eq("id", b.dataset.delMeal); route(); }));
   $$("[data-del-act]").forEach((b) => (b.onclick = async () => { await sb.from("activities").delete().eq("id", b.dataset.delAct); route(); }));
@@ -385,6 +393,142 @@ function openNotifSheet() {
     } catch (e) { fail(e); } finally { tb.disabled = false; }
   };
 }
+
+// ---------- BADGES ----------
+const BADGE_IC = {
+  fork: '<path d="M7 3v8a3 3 0 0 0 3 3v7M10 3v6M13 3v8a3 3 0 0 1-3 3M17 3c-1.5 2-2 4-2 7h3v11"/>',
+  flame: '<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3 0-3 0-5 1-8.5z"/>',
+  camera: '<path d="M14.5 4h-5L7.5 6.5H4a1 1 0 0 0-1 1V19a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V7.5a1 1 0 0 0-1-1h-3.5z"/><circle cx="12" cy="13" r="3.5"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  bolt: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+  shoe: '<path d="M3 16l2-8 4 2 3-1 2 3 6 2a2 2 0 0 1 1 2v1H3zM3 19h18"/>',
+  steps: '<path d="M7 15c-1.5 0-2.5-1.5-2.5-4S5.5 5 7.5 5 10 7 10 9.5 9 15 7 15zM5 18h4M17 19c-2 0-3-5.5-3-8S15 5 16.5 5 19.5 6.5 19.5 9s-1 4-2.5 4M15 22h4"/>',
+  scale: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M8 9a4 4 0 0 1 8 0M12 9l1.5-2"/>',
+  people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
+  trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
+  star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+  crown: '<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5z"/>',
+};
+const badgeSvg = (b, size = 30) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${BADGE_IC[b.icon] || BADGE_IC.star}</svg>`;
+const badgeTile = (b, i) => `<button class="badge-tile${b.earned_at ? "" : " locked"}" data-badge="${i}" aria-label="${esc(b.name)}${b.earned_at ? "" : " (locked)"}">
+  <span class="badge-coin" style="background:${b.earned_at ? b.color : "#EDE9E3"}">${badgeSvg(b)}</span>
+  <span class="badge-name">${esc(b.name)}</span></button>`;
+function wireBadgeTiles(list, root = app) {
+  root.querySelectorAll("[data-badge]").forEach((el) => (el.onclick = () => {
+    const b = list[+el.dataset.badge];
+    openSheet(b.name, `<div class="center stack" style="align-items:center">
+      <span class="badge-coin big" style="background:${b.earned_at ? b.color : "#EDE9E3"}">${badgeSvg(b, 56)}</span>
+      <p>${esc(b.description)}</p>
+      ${b.note ? `<p class="quip">“${esc(b.note)}”</p>` : ""}
+      <p class="muted">${b.earned_at ? `Earned ${new Date(b.earned_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : b.kind === "gift" ? "A gift from the Snack & Burn team" : "Not earned yet. Keep going!"}</p>
+    </div>`);
+  }));
+}
+async function badgesView() {
+  const list = await rpc("my_badge_list");
+  const got = list.filter((b) => b.earned_at).length;
+  app.innerHTML = `
+    <div class="row"><h1>Badges</h1><span class="badge">${got} / ${list.filter((b) => b.kind === "auto").length}</span></div>
+    <p class="muted">Earn them by logging, moving and racing friends. Some are special gifts from the team.</p>
+    <div class="badge-grid">${list.map(badgeTile).join("")}</div>`;
+  wireBadgeTiles(list);
+}
+// Award new badges, then celebrate any unseen ones (one sheet each)
+let badgeCheckBusy = false;
+async function checkBadges() {
+  if (badgeCheckBusy) return; badgeCheckBusy = true;
+  try {
+    await rpc("award_badges");
+    const unseen = await rpc("unseen_badges");
+    for (const b of unseen) {
+      await new Promise((res) => {
+        const s = openSheet(b.note ? "You got a gift!" : "New badge!", `<div class="center stack" style="align-items:center">
+          <span class="badge-coin big pop" style="background:${b.color}">${badgeSvg(b, 64)}</span>
+          <h1 style="font-size:26px">${esc(b.name)}</h1>
+          <p>${esc(b.description)}</p>
+          ${b.note ? `<p class="quip">“${esc(b.note)}”</p>` : ""}
+          <button class="primary block" data-ok>${profile.serious_mode ? "OK" : "Nice!"}</button></div>`);
+        const done = () => { s.close(); res(); };
+        s.el.querySelector("[data-ok]").onclick = done;
+        s.el.querySelector("[data-close]").onclick = done;
+      });
+      await sb.from("user_badges").update({ seen: true }).eq("user_id", user.id).eq("code", b.code);
+    }
+  } catch (e) { console.warn("badges", e); } finally { badgeCheckBusy = false; }
+}
+async function openGiftSheet(uid, name) {
+  const { data: cat } = await sb.from("badge_catalog").select("*").order("sort");
+  const s = openSheet(`Gift a badge to ${name}`, `
+    <label>Badge<select id="gCode">${(cat || []).map((b) => `<option value="${esc(b.code)}">${esc(b.name)}${b.kind === "gift" ? " ★" : ""}</option>`).join("")}</select></label>
+    <label>Message (optional)<input id="gNote" maxlength="140" placeholder="Great week, keep it up!"></label>
+    <button class="primary block" id="gGo">Send badge</button>
+    <p class="muted">★ = special gift badges. They’ll see a celebration next time they open Home.</p>`);
+  s.el.querySelector("#gGo").onclick = async () => {
+    try { await rpc("admin_gift_badge", { uid, p_code: s.el.querySelector("#gCode").value, p_note: s.el.querySelector("#gNote").value.trim() || null }); s.close(); toast("Badge sent"); }
+    catch (e) { fail(e); }
+  };
+}
+
+// ---------- AI COACH ----------
+const COACH_FACE = `<svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true"><circle cx="20" cy="20" r="20" fill="#1A1A1A"/><path d="M20 7c1.4 4.2 7 7 7 13.5a7 7 0 0 1-14 0c0-2.8 1.4-4.9 2.8-6.3.4 2.1 1.4 3.5 2.8 4.2 0-4.2 0-7 1.4-11.4z" fill="#D93A1E"/><circle cx="17.5" cy="22" r="1.4" fill="#FFF8EE"/><circle cx="22.5" cy="22" r="1.4" fill="#FFF8EE"/><path d="M17.5 25.5q2.5 2 5 0" stroke="#FFF8EE" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>`;
+async function loadCoachTip() {
+  try {
+    const { data } = await sb.functions.invoke("coach", { body: { mode: "weekly" } });
+    const tip = (data?.report || "").split("\n").find((l) => /^Mẹo hôm nay/i.test(l.trim())) || (data?.report || "").split("\n")[0];
+    const el = document.getElementById("coachTip");
+    if (el && tip) el.textContent = tip.trim();
+  } catch { /* keep default text */ }
+}
+let coachHistory = [];
+try { coachHistory = JSON.parse(sessionStorage.getItem("snb_coach") || "[]"); } catch { coachHistory = []; }
+async function coach() {
+  const chips = ["Tối nay nên ăn gì?", "Tuần này mình làm tốt chưa?", "Làm sao giảm 2 kg trong 1 tháng?", "Nên chạy bao nhiêu km mỗi tuần?"];
+  app.innerHTML = `
+    <div class="row" style="justify-content:flex-start;gap:12px"><a class="icon-btn" href="#home" aria-label="Back">${sv('<path d="M15 6l-6 6 6 6"/>')}</a>
+      <span class="coach-av">${COACH_FACE}</span><div><h1 style="font-size:24px">Coach</h1><p class="muted">Your AI coach · not medical advice</p></div></div>
+    <section class="card stack" aria-label="Weekly check-in">
+      <div class="row"><b>This week’s check-in</b><button class="outline small" id="refreshRep">Refresh</button></div>
+      <div id="report"><div class="skel" style="height:18px;width:90%"></div><div class="skel" style="height:18px;width:75%;margin-top:8px"></div><div class="skel" style="height:18px;width:82%;margin-top:8px"></div></div>
+    </section>
+    <h2>Ask Coach</h2>
+    <div id="chat" class="stack" aria-live="polite">${coachHistory.map(bubble).join("")}</div>
+    <div class="chips">${chips.map((c) => `<button class="chip" data-q="${esc(c)}">${esc(c)}</button>`).join("")}</div>
+    <form id="askF" class="say-row">
+      <textarea id="askT" rows="1" placeholder="Hỏi Coach bất cứ điều gì…" aria-label="Ask Coach"></textarea>
+      <button class="mic" aria-label="Send">${sv('<path d="M4 12l16-8-6 16-2-6z"/>')}</button>
+    </form>
+    ${coachHistory.length ? `<button class="outline small" id="clearChat" style="align-self:center">Clear chat</button>` : ""}`;
+  const loadRep = async (refresh) => {
+    $("#report").innerHTML = `<div class="skel" style="height:18px;width:90%"></div><div class="skel" style="height:18px;width:75%;margin-top:8px"></div>`;
+    try {
+      const { data, error } = await sb.functions.invoke("coach", { body: { mode: "weekly", refresh } });
+      if (error || data.error) throw new Error(data?.error || error.message);
+      $("#report").innerHTML = `<p class="report">${esc(data.report)}</p>`;
+    } catch (e) { $("#report").innerHTML = `<p class="muted">Coach couldn’t write the report right now. Try Refresh in a minute.</p>`; console.warn(e); }
+  };
+  loadRep(false);
+  $("#refreshRep").onclick = () => loadRep(true);
+  const send = async (q) => {
+    q = q.trim(); if (!q) return;
+    coachHistory.push({ role: "user", text: q });
+    $("#chat").insertAdjacentHTML("beforeend", bubble({ role: "user", text: q }) + `<div class="bubble coach" id="typing"><span class="dots"><i></i><i></i><i></i></span></div>`);
+    $("#askT").value = ""; $("#typing").scrollIntoView({ block: "end", behavior: "smooth" });
+    try {
+      const { data, error } = await sb.functions.invoke("coach", { body: { mode: "chat", question: q, history: coachHistory.slice(-7, -1) } });
+      if (error || data.error) throw new Error(data?.error || error.message);
+      coachHistory.push({ role: "coach", text: data.answer });
+    } catch (e) { coachHistory.push({ role: "coach", text: "Xin lỗi, mình đang bận một chút. Bạn hỏi lại sau ít phút nhé." }); console.warn(e); }
+    try { sessionStorage.setItem("snb_coach", JSON.stringify(coachHistory.slice(-20))); } catch { /* ignore */ }
+    $("#typing").outerHTML = bubble(coachHistory[coachHistory.length - 1]);
+    $("#chat").lastElementChild.scrollIntoView({ block: "end", behavior: "smooth" });
+  };
+  $("#askF").onsubmit = (e) => { e.preventDefault(); send($("#askT").value); };
+  $("#askT").onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send($("#askT").value); } };
+  $$("[data-q]").forEach((b) => (b.onclick = () => send(b.dataset.q)));
+  const cc = $("#clearChat"); if (cc) cc.onclick = () => { coachHistory = []; sessionStorage.removeItem("snb_coach"); route(); };
+}
+const bubble = (m) => `<div class="bubble ${m.role === "coach" ? "coach" : "me"}">${esc(m.text)}</div>`;
 
 // ---------- WEIGHT ----------
 function weightCard(wts) {
@@ -809,13 +953,9 @@ async function challenges(q) {
           <b>${fmt(r.score)} ${unit}</b></div>`).join("")}</div>`;
     }).join("") : `<div class="card"><p>No ${challengeMetric === "km" ? "km" : "kcal"} challenges yet.</p><p class="muted">Tap + New and pick some friends.</p></div>`}
 
-    <h2>Your badges</h2>
-    <div class="grid g4">
-      <div class="tile" style="background:var(--tint-snack)"><b>${bd.streak}</b>Day streak</div>
-      <div class="tile" style="background:var(--tint-burn)"><b>${bd.challenge_wins}×</b>Wins</div>
-      <div class="tile" style="background:${bd.total_km >= 100 ? "var(--tint-ok)" : "#EDE9E3"}"><b>${n0(bd.total_km)}</b>${bd.total_km >= 100 ? "km club" : "/100 km"}</div>
-      <div class="tile" style="background:${bd.streak >= 30 ? "var(--tint-ok)" : "#EDE9E3"}"><b>${bd.streak >= 30 ? "30" : "?"}</b>${bd.streak >= 30 ? "Iron month" : "Locked"}</div>
-    </div>`;
+    <div class="row"><h2>Your badges</h2><a class="btn outline small" href="#badges">See all</a></div>
+    <div class="badge-grid" id="chBadges"><div class="skel" style="height:96px;grid-column:1/-1"></div></div>`;
+  rpc("my_badge_list").then((list) => { const el = $("#chBadges"); if (el) el.innerHTML = list.slice(0, 8).map(badgeTile).join(""); wireBadgeTiles(list); }).catch(() => {});
 
   $$("[data-m]").forEach((b) => (b.onclick = () => { challengeMetric = b.dataset.m; route(); }));
   $$("[data-join]").forEach((b) => (b.onclick = async () => {
@@ -923,6 +1063,7 @@ const ICON = {
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   out: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
+  star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   chev: '<path d="M9 6l6 6-6 6"/>',
 };
 const ic = (k, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
@@ -1002,6 +1143,7 @@ async function profileView() {
 
     <h2 class="set-h">Account</h2>
     <div class="set-group">
+      ${row("rowBadges", "star", "#FFF1D2", "Badges", "")}
       ${row("rowPw", "lock", "#EDE9E3", "Password", "Change")}
       ${row("rowInstall", "phone", "var(--tint-ok)", "Add to Home Screen", "")}
       ${profile.is_admin ? row("rowAdmin", "shield", "#EFEDFF", "Admin", "") : ""}
@@ -1079,6 +1221,7 @@ async function profileView() {
   };
 
   $("#rowInstall").onclick = () => showInstallGuide(true);
+  $("#rowBadges").onclick = () => { location.hash = "#badges"; };
   $("#rowNotif").onclick = () => openNotifSheet();
   const ad = $("#rowAdmin"); if (ad) ad.onclick = () => { location.hash = "#admin"; };
   $("#serious").onclick = async () => {
@@ -1134,6 +1277,7 @@ async function admin() {
           <div class="muted">Joined ${new Date(u.created_at).toLocaleDateString("en-GB")} · ${u.meals} meals · ${n1(u.km)} km</div></div>
         ${u.id === user.id ? "" : `<div class="stack" style="gap:6px">
           <button class="outline small" data-block="${u.id}" data-b="${!u.blocked}">${u.blocked ? "Unblock" : "Block"}</button>
+          <button class="outline small" data-gift="${u.id}" data-name="${esc(u.display_name)}">Gift badge</button>
           <button class="outline small danger" data-delete="${u.id}" data-name="${esc(u.display_name)}">Delete</button></div>`}
       </div>`).join("")}</div>`;
   }
@@ -1236,6 +1380,7 @@ async function admin() {
   $$("[data-block]").forEach((b) => (b.onclick = async () => {
     try { await rpc("admin_set_blocked", { uid: b.dataset.block, b: b.dataset.b === "true" }); route(); } catch (e) { fail(e); }
   }));
+  $$("[data-gift]").forEach((b) => (b.onclick = () => openGiftSheet(b.dataset.gift, b.dataset.name)));
   $$("[data-delete]").forEach((b) => (b.onclick = async () => {
     if (!confirm(`Delete ${b.dataset.name} and all their data? This cannot be undone.`)) return;
     try { await rpc("admin_delete_user", { uid: b.dataset.delete }); toast("User deleted"); route(); } catch (e) { fail(e); }
