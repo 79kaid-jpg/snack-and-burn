@@ -294,7 +294,7 @@ async function snap() {
         <div class="row"><label style="flex:1">kcal (medium portion)<input name="kcal" type="number" inputmode="numeric" min="0"></label><button class="outline small" style="align-self:flex-end">Add</button></div>
       </form>
       <div class="row"><span>Meal total</span><b>${n0(total)} kcal</b></div>
-      <p class="muted">AI estimate, ±20%</p>
+      <p class="muted">AI estimate, ±20%${s.provider ? ` · read by ${s.provider === "claude" ? "Claude" : "Gemini"}` : ""}</p>
       <button class="primary block" id="calc" ${s.items.length ? "" : "disabled"}>Calculate my burn</button>
       <button class="outline block" id="retake">Start over</button>`;
     $$("[data-z]").forEach((b) => (b.onclick = () => { s.items[b.dataset.i].size = b.dataset.z; route(); }));
@@ -363,7 +363,7 @@ async function analyze() {
     const { data, error } = await sb.functions.invoke("analyze-meal", { body: { image: s.photo, media_type: "image/jpeg" } });
     if (error) throw error;
     if (data.error) throw new Error(data.error);
-    s.items = (data.items || []).map((i) => ({ name: i.name, kcal: i.kcal, size: "M" }));
+    s.items = (data.items || []).map((i) => ({ name: i.name, kcal: i.kcal, size: "M" })); s.provider = data.provider;
     if (!s.items.length) toast("No food spotted. Add dishes by hand.");
   } catch (e) {
     console.error(e); toast("AI couldn’t read the photo. Add dishes by hand.");
@@ -668,14 +668,58 @@ async function admin() {
         : `<p class="muted">No official events yet.</p>`}`;
   }
 
+  if (adminTab === "ai") {
+    const [{ data: rows, error }, st] = await Promise.all([
+      sb.from("app_settings").select("key,value"),
+      sb.functions.invoke("analyze-meal", { body: { action: "status" } }),
+    ]);
+    if (error) throw error;
+    const cfg = Object.fromEntries(rows.map((x) => [x.key, x.value]));
+    const keys = st.data?.keys || {};
+    const prov = cfg.ai_provider || "gemini";
+    const keyTag = (ok) => ok ? `<span class="ok">Key added</span>` : `<span class="danger">No key in Supabase</span>`;
+    body = `
+      <form id="ai" class="card stack">
+        <b>Photo AI provider</b>
+        <p class="muted">Used to read meal photos. If the chosen provider has no key, the app uses the other one.</p>
+        <div class="seg" role="radiogroup" aria-label="AI provider">
+          <button type="button" role="radio" aria-pressed="${prov === "gemini"}" aria-checked="${prov === "gemini"}" data-prov="gemini">Gemini</button>
+          <button type="button" role="radio" aria-pressed="${prov === "claude"}" aria-checked="${prov === "claude"}" data-prov="claude">Claude</button>
+        </div>
+        <input type="hidden" name="provider" value="${esc(prov)}">
+        <label>Gemini model · ${keyTag(keys.gemini)}<input name="gemini" value="${esc(cfg.ai_model_gemini || "")}" autocapitalize="off" spellcheck="false"></label>
+        <label>Claude model · ${keyTag(keys.claude)}<input name="claude" value="${esc(cfg.ai_model_claude || "")}" autocapitalize="off" spellcheck="false"></label>
+        <button class="primary block">Save AI settings</button>
+        <p class="muted">Keys are added in Supabase → Edge Functions → Secrets as GEMINI_API_KEY and ANTHROPIC_API_KEY.</p>
+      </form>`;
+  }
+
   app.innerHTML = `
     <div class="row"><h1>Admin</h1><a class="btn outline small" href="#profile">Done</a></div>
     <div class="seg" role="group" aria-label="Admin section">
-      ${[["stats", "Stats"], ["users", "Users"], ["dishes", "Dishes"], ["events", "Events"]].map(([k, t]) => `<button aria-pressed="${adminTab === k}" data-at="${k}">${t}</button>`).join("")}
+      ${[["stats", "Stats"], ["users", "Users"], ["dishes", "Dishes"], ["events", "Events"], ["ai", "AI"]].map(([k, t]) => `<button aria-pressed="${adminTab === k}" data-at="${k}">${t}</button>`).join("")}
     </div>
     ${body}`;
 
   $$("[data-at]").forEach((b) => (b.onclick = () => { adminTab = b.dataset.at; route(); }));
+  const ai = $("#ai");
+  if (ai) {
+    $$("[data-prov]").forEach((b) => (b.onclick = () => {
+      ai.provider.value = b.dataset.prov;
+      $$("[data-prov]").forEach((x) => { const on = x === b; x.setAttribute("aria-pressed", on); x.setAttribute("aria-checked", on); });
+    }));
+    ai.onsubmit = async (e) => {
+      e.preventDefault();
+      const now = new Date().toISOString();
+      const { error } = await sb.from("app_settings").upsert([
+        { key: "ai_provider", value: ai.provider.value, updated_at: now },
+        { key: "ai_model_gemini", value: ai.gemini.value.trim() || "gemini-flash-latest", updated_at: now },
+        { key: "ai_model_claude", value: ai.claude.value.trim() || "claude-sonnet-5-5", updated_at: now },
+      ]);
+      if (error) return fail(error);
+      toast(`Photo AI now uses ${ai.provider.value === "claude" ? "Claude" : "Gemini"}`);
+    };
+  }
   $$("[data-block]").forEach((b) => (b.onclick = async () => {
     try { await rpc("admin_set_blocked", { uid: b.dataset.block, b: b.dataset.b === "true" }); route(); } catch (e) { fail(e); }
   }));
