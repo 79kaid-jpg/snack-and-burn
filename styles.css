@@ -140,3 +140,6 @@ main { gap: 12px; }
 .wbar i { position: absolute; left: -3px; right: -3px; border-top: 2px dashed #B9AC98; }
 .rank { font-family: Fredoka, sans-serif; font-size: 30px; color: var(--burn-ink); white-space: nowrap; }
 .rank small { font-size: 14px; color: var(--muted); }
+
+#syncSteps { gap: 6px; padding: 0 12px; }
+#syncSteps .ic { width: 18px; height: 18px; }

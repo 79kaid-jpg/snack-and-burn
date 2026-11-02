@@ -281,7 +281,7 @@ async function home(q) {
     <div class="row"><b>${n0(m.kcal)}</b><button class="icon-btn" data-del-meal="${m.id}" aria-label="Remove ${esc(m.name)}"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
     : `<a class="empty" href="#snap"><span>No meals yet today</span><b>Snap one →</b></a>`}
 
-  <div class="row"><h2>Burns today</h2><button class="primary small" id="showLog">+ Log a burn</button></div>
+  <div class="row"><h2>Burns today</h2><div class="row" style="gap:8px">${isIOS() ? `<button class="outline small" id="syncSteps" aria-label="Sync steps from Apple Health">${ACT.steps.icon}<span>Sync</span></button>` : ""}<button class="primary small" id="showLog">+ Log a burn</button></div></div>
   ${acts.data.length ? `<div class="list" style="background:var(--tint-burn)">${acts.data.map((a) => `
     <div class="row"><div class="row" style="justify-content:flex-start;gap:12px"><span class="act-ic">${ACT[a.steps > 0 ? "steps" : a.kind].icon}</span><div><div>${a.steps > 0 ? `${n0(a.steps)} steps` : esc(ACT[a.kind].label)}${a.distance_km ? ` · ${n1(a.distance_km)} km` : ""}${a.minutes ? ` · ${a.minutes} min` : ""}</div><div class="muted">${time(a.started_at)} · ${esc(a.source)}</div></div></div>
     <div class="row"><b class="danger">−${n0(a.kcal)}</b><button class="icon-btn" data-del-act="${a.id}" aria-label="Remove activity"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
@@ -305,11 +305,29 @@ async function home(q) {
 
   $("#showLog").onclick = () => openBurnSheet();
   $("#quickBurn").onclick = () => openBurnSheet();
+  const ss = $("#syncSteps");
+  if (ss) ss.onclick = () => runStepShortcut();
   const eb = $("#emptyBurn"); if (eb) eb.onclick = () => openBurnSheet();
   if (q.get("log")) { history.replaceState(null, "", "#home"); openBurnSheet({ kind: "run", km: +q.get("km") || 0 }); }
   $$("[data-del-meal]").forEach((b) => (b.onclick = async () => { await sb.from("meals").delete().eq("id", b.dataset.delMeal); route(); }));
   $$("[data-del-act]").forEach((b) => (b.onclick = async () => { await sb.from("activities").delete().eq("id", b.dataset.delAct); route(); }));
 }
+
+// ---------- STEP SYNC: run the user's Apple Shortcut, then come back ----------
+const stepShortcutName = () => { try { return localStorage.getItem("snb_shortcut") || "Lấy số bước chân"; } catch { return "Lấy số bước chân"; } };
+function runStepShortcut() {
+  const back = location.origin + location.pathname + "#home";
+  sessionStorage.setItem("snb_syncing", String(Date.now()));
+  location.href = `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(stepShortcutName())}&x-success=${encodeURIComponent(back)}&x-error=${encodeURIComponent(back)}`;
+}
+// when the user comes back from Shortcuts, refresh Home to show the new steps
+document.addEventListener("visibilitychange", () => {
+  const t = +sessionStorage.getItem("snb_syncing") || 0;
+  if (document.visibilityState === "visible" && t && Date.now() - t < 5 * 60 * 1000) {
+    sessionStorage.removeItem("snb_syncing");
+    setTimeout(() => { if (location.hash.startsWith("#home") || !location.hash) route(); }, 1500);
+  }
+});
 
 // ---------- LOG A BURN (bottom sheet) ----------
 const sv = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
@@ -791,8 +809,10 @@ async function profileView() {
         <span class="kbd">code</span> = your sync code (Text)<br><span class="kbd">steps</span> = <b>Statistics</b> (Number)</div></div>
       <div class="step"><span class="num">6</span><div>Tap ▶ to test. Allow Health access when asked. You should see “steps saved”.</div></div>
       <div class="step"><span class="num">7</span><div><b>Make it automatic:</b> Shortcuts → <b>Automation</b> → <b>+</b> → <b>Time of Day</b> (e.g. 21:00, Daily) → <b>Run Immediately</b> → pick this shortcut. Add a second one for when you open Snack &amp; Burn if you like.</div></div>
+      <label>Your shortcut’s name (for the Sync button on Home)<input id="scName" value="${esc(stepShortcutName())}" autocapitalize="off"></label>
       <button class="outline small danger" id="newCode">Make a new code (old one stops working)</button>`;
     g.hidden = false;
+    g.querySelector("#scName").onchange = (e) => { try { localStorage.setItem("snb_shortcut", e.target.value.trim()); } catch { /* ignore */ } toast("Saved"); };
     g.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied"); }));
     g.querySelector("#newCode").onclick = async () => {
       if (!confirm("Make a new sync code? You’ll need to paste it into your Shortcut again.")) return;
