@@ -17,6 +17,15 @@ hidden oil, fat and sugar. Reply with JSON only, no prose:
 {"items":[{"name":"...","grams":0,"kcal":0}]}
 If there is no food in the photo, reply {"items":[]}.`;
 
+const TEXT_PROMPT = (t: string) => `You are a nutrition estimator for a calorie app used in Vietnam.
+The user described what they ate (Vietnamese or English, may be casual or voice-dictated):
+"""${t.slice(0, 500)}"""
+List each distinct food or drink. Use Vietnamese dish names with diacritics and an English hint in brackets.
+Use the quantity they said (e.g. "2 cái", "1 tô lớn", "ly nhỏ"); otherwise assume a typical Vietnamese portion.
+Estimate grams and calories including likely oil, fat and sugar. Reply with JSON only:
+{"items":[{"name":"...","grams":0,"kcal":0}]}
+If nothing edible is mentioned, reply {"items":[]}.`;
+
 type Settings = { provider: string; claudeModel: string; geminiModel: string };
 
 async function loadSettings(): Promise<Settings> {
@@ -36,16 +45,15 @@ async function loadSettings(): Promise<Settings> {
   return s;
 }
 
-async function askClaude(model: string, image: string, mediaType: string): Promise<string> {
+async function askClaude(model: string, image: string | null, mediaType: string, text?: string): Promise<string> {
   const r = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": Deno.env.get("ANTHROPIC_API_KEY")!, "anthropic-version": "2023-06-01", "content-type": "application/json" },
     body: JSON.stringify({
       model, max_tokens: 600,
-      messages: [{ role: "user", content: [
-        { type: "image", source: { type: "base64", media_type: mediaType, data: image } },
-        { type: "text", text: PROMPT },
-      ] }],
+      messages: [{ role: "user", content: image
+        ? [{ type: "image", source: { type: "base64", media_type: mediaType, data: image } }, { type: "text", text: PROMPT }]
+        : [{ type: "text", text: TEXT_PROMPT(text ?? "") }] }],
     }),
     signal: AbortSignal.timeout(45000),
   });
@@ -54,12 +62,12 @@ async function askClaude(model: string, image: string, mediaType: string): Promi
   return data.content?.find((c: { type: string }) => c.type === "text")?.text ?? "{}";
 }
 
-async function askGemini(model: string, image: string, mediaType: string): Promise<string> {
+async function askGemini(model: string, image: string | null, mediaType: string, text?: string): Promise<string> {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
     headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "content-type": "application/json" },
     body: JSON.stringify({
-      contents: [{ parts: [{ inline_data: { mime_type: mediaType, data: image } }, { text: PROMPT }] }],
+      contents: [{ parts: image ? [{ inline_data: { mime_type: mediaType, data: image } }, { text: PROMPT }] : [{ text: TEXT_PROMPT(text ?? "") }] }],
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: 4096 },
     }),
     signal: AbortSignal.timeout(45000),
@@ -83,10 +91,11 @@ Deno.serve(async (req) => {
       return json({ provider: settings.provider, keys: { claude: hasClaude, gemini: hasGemini } });
     }
 
-    const { image, media_type } = body;
-    if (!image || typeof image !== "string" || image.length > 7_000_000) {
-      return json({ error: "Send a JPEG/PNG photo under 5 MB" }, 400);
-    }
+    const { media_type } = body;
+    const image: string | null = typeof body.image === "string" ? body.image : null;
+    const said: string = typeof body.text === "string" ? body.text.trim() : "";
+    if (!image && !said) return json({ error: "Send a photo or describe your meal" }, 400);
+    if (image && image.length > 7_000_000) return json({ error: "Send a JPEG/PNG photo under 5 MB" }, 400);
     const mediaType = media_type ?? "image/jpeg";
 
     // Use the chosen provider; fall back to the other one if its key is missing
@@ -95,11 +104,11 @@ Deno.serve(async (req) => {
     if (provider === "gemini" && !hasGemini && hasClaude) provider = "claude";
     if (!(provider === "claude" ? hasClaude : hasGemini)) return json({ error: "AI is not configured yet" }, 503);
 
-    console.log("photo", Math.round(image.length / 1024), "KB base64 → provider", provider);
+    console.log(image ? `photo ${Math.round(image.length / 1024)} KB` : `text: ${said.slice(0, 80)}`, "→ provider", provider);
     const t0 = Date.now();
     const text = provider === "claude"
-      ? await askClaude(settings.claudeModel, image, mediaType)
-      : await askGemini(settings.geminiModel, image, mediaType);
+      ? await askClaude(settings.claudeModel, image, mediaType, said)
+      : await askGemini(settings.geminiModel, image, mediaType, said);
 
     console.log("ai reply in", Date.now() - t0, "ms:", text.slice(0, 300));
     const match = text.match(/\{[\s\S]*\}/);

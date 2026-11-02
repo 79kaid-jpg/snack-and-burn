@@ -165,3 +165,11 @@ main { gap: 12px; }
 .set-chev { color: #B9AC98; }
 .set-out { background: #fff; border-radius: var(--r); justify-content: center; color: var(--burn-ink); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
 .sheet .set-group { box-shadow: none; border: 1px solid var(--line); }
+
+/* ---- voice log, weight ---- */
+.say-row { display: grid; grid-template-columns: 1fr 52px; gap: 8px; align-items: stretch; }
+.say-row textarea { font: inherit; font-size: 16px; border: 2px solid #E8D9C2; border-radius: 12px; padding: 10px 12px; resize: none; min-height: 64px; color: var(--ink); background: #fff; }
+.mic { width: 52px; min-height: 52px; padding: 0; border-radius: 14px; background: var(--ink); color: var(--snack); }
+.mic.on { background: var(--burn); color: #fff; animation: pulse 1s infinite; }
+@keyframes pulse { 50% { transform: scale(1.06); } }
+.spark { width: 100%; height: 76px; }

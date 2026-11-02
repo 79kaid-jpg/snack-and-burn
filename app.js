@@ -75,7 +75,7 @@ async function route() {
   if (!user) { tabs.hidden = true; return login(); }
   if (!profile || profile.id !== user.id) {
     const { data: p, error } = await sb.from("profiles")
-      .select("id,display_name,sex,age,height_cm,weight_kg,activity,budget_kcal,visibility,serious_mode,invite_code,onboarded,is_admin,blocked")
+      .select("id,display_name,sex,age,height_cm,weight_kg,activity,budget_kcal,visibility,serious_mode,invite_code,onboarded,is_admin,blocked,notify_meals,notify_burn,notify_challenge")
       .eq("id", user.id).single();
     if (error) return fail(error);
     profile = p;
@@ -201,6 +201,8 @@ function wireStats(onDone, root = app) {
     const { error } = await sb.from("profiles").update(patch).eq("id", user.id);
     if (error) return fail(error);
     Object.assign(profile, patch);
+    const day = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+    await sb.from("weights").upsert({ day, kg: v.weight_kg }, { onConflict: "user_id,day" });
     onDone();
   };
 }
@@ -214,6 +216,9 @@ function onboarding() {
 async function home(q) {
   const since = startOfToday();
   const wk0 = new Date(); wk0.setHours(0, 0, 0, 0); wk0.setDate(wk0.getDate() - 6);
+  const d60 = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+  const wRes = await sb.from("weights").select("day,kg").gte("day", d60).order("day");
+  const wts = wRes.data || [];
   const [meals, acts, streak, wkMeals, wkActs, chs] = await Promise.all([
     sb.from("meals").select("*").gte("eaten_at", since).order("eaten_at"),
     sb.from("activities").select("*").gte("started_at", since).order("started_at"),
@@ -287,6 +292,8 @@ async function home(q) {
     <div class="row"><b class="danger">−${n0(a.kcal)}</b><button class="icon-btn" data-del-act="${a.id}" aria-label="Remove activity"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
     : `<button class="empty" id="emptyBurn"><span>No burns yet today</span><b>Log one →</b></button>`}
 
+  ${weightCard(wts)}
+
   <section class="card stack" aria-label="This week">
     <div class="row"><b>This week</b><span class="muted">${onTarget}/7 days on budget · ${n1(wkKm)} km run</span></div>
     <div class="week" role="img" aria-label="Calories eaten and burned over the last 7 days">
@@ -305,12 +312,133 @@ async function home(q) {
 
   $("#showLog").onclick = () => openBurnSheet();
   $("#quickBurn").onclick = () => openBurnSheet();
+  $("#logWeight").onclick = () => openWeightSheet(wts);
   const ss = $("#syncSteps");
   if (ss) ss.onclick = () => runStepShortcut();
   const eb = $("#emptyBurn"); if (eb) eb.onclick = () => openBurnSheet();
   if (q.get("log")) { history.replaceState(null, "", "#home"); openBurnSheet({ kind: "run", km: +q.get("km") || 0 }); }
   $$("[data-del-meal]").forEach((b) => (b.onclick = async () => { await sb.from("meals").delete().eq("id", b.dataset.delMeal); route(); }));
   $$("[data-del-act]").forEach((b) => (b.onclick = async () => { await sb.from("activities").delete().eq("id", b.dataset.delAct); route(); }));
+}
+
+// ---------- PUSH NOTIFICATIONS ----------
+const VAPID_PUBLIC = "BJCK__cmtVQqDzfZX3wNBc7LMLXq3NERwk6iuH3F2br1PPiek99Xbvl_l28vV99bRvhZ6G42xc_vvC99L4ROQ5U";
+const pushSupported = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+function pushState() {
+  if (!pushSupported()) return isIOS() && !isStandalone() ? "Add to Home Screen first" : "Not supported";
+  return { granted: `<span class="ok">On</span>`, denied: "Blocked", default: "Off" }[Notification.permission];
+}
+function b64ToBytes(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+async function enablePush() {
+  const perm = await Notification.requestPermission();
+  if (perm !== "granted") throw new Error("Notifications were not allowed");
+  const reg = await navigator.serviceWorker.ready;
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
+  const j = sub.toJSON();
+  const { error } = await sb.from("push_subs").upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+  if (error) throw error;
+}
+function openNotifSheet() {
+  if (!pushSupported()) {
+    if (isIOS() && !isStandalone()) { toast("Add Snack & Burn to your Home Screen first, then open it from there"); return showInstallGuide(true); }
+    return toast("This browser can’t show notifications");
+  }
+  const on = Notification.permission === "granted";
+  const t = (k, label, desc) => `<div class="set-row"><span class="set-t">${label}<span class="muted" style="display:block;font-size:12px">${desc}</span></span>
+    <button class="switch" data-pref="${k}" aria-label="${label}" aria-pressed="${!!profile[k]}"></button></div>`;
+  const s = openSheet("Notifications", `
+    ${on ? "" : `<p class="muted">Get a nudge when you forget to log, and when a friend is beating you.</p>
+      <button class="primary block" id="pushOn">${Notification.permission === "denied" ? "Blocked in Settings" : "Turn on notifications"}</button>
+      ${Notification.permission === "denied" ? `<p class="muted">Turn them back on in iPhone Settings → Notifications → Snack &amp; Burn.</p>` : ""}`}
+    <div class="set-group">
+      ${t("notify_meals", "Lunch reminder", "12:00 if you haven’t logged a meal")}
+      ${t("notify_challenge", "Challenge updates", "18:00 how far you are from the lead")}
+      ${t("notify_burn", "Evening burn nudge", "19:00 if you haven’t moved today")}
+    </div>
+    ${on ? `<button class="outline block" id="pushTest">Send a test notification</button>` : ""}`);
+  const btn = s.el.querySelector("#pushOn");
+  if (btn) btn.onclick = async () => {
+    if (Notification.permission === "denied") return;
+    btn.disabled = true; btn.textContent = "Turning on…";
+    try { await enablePush(); s.close(); toast("Notifications on"); route(); openNotifSheet(); }
+    catch (e) { btn.disabled = false; btn.textContent = "Turn on notifications"; fail(e); }
+  };
+  s.el.querySelectorAll("[data-pref]").forEach((b) => (b.onclick = async () => {
+    const k = b.dataset.pref; const v = !profile[k];
+    const { error } = await sb.from("profiles").update({ [k]: v }).eq("id", user.id);
+    if (error) return fail(error);
+    profile[k] = v; b.setAttribute("aria-pressed", v);
+  }));
+  const tb = s.el.querySelector("#pushTest");
+  if (tb) tb.onclick = async () => {
+    tb.disabled = true;
+    try {
+      await enablePush(); // refresh this device's subscription
+      const { data, error } = await sb.functions.invoke("send-reminders", { body: { test: true } });
+      if (error) throw error;
+      toast(data.sent ? "Sent! Check your notifications" : "No device registered yet");
+    } catch (e) { fail(e); } finally { tb.disabled = false; }
+  };
+}
+
+// ---------- WEIGHT ----------
+function weightCard(wts) {
+  const last = wts[wts.length - 1];
+  const first = wts[0];
+  const diff = last && first ? Number(last.kg) - Number(first.kg) : 0;
+  let spark = "";
+  if (wts.length >= 2) {
+    const ks = wts.map((x) => Number(x.kg)); const mn = Math.min(...ks) - 0.5, mx = Math.max(...ks) + 0.5;
+    const t0 = new Date(first.day).getTime(), t1 = Math.max(new Date(last.day).getTime(), t0 + 864e5);
+    const pts = wts.map((x) => `${((new Date(x.day).getTime() - t0) / (t1 - t0)) * 300},${70 - ((Number(x.kg) - mn) / (mx - mn)) * 60}`).join(" ");
+    spark = `<svg viewBox="-6 0 312 76" class="spark" role="img" aria-label="Weight over the last ${wts.length} entries, from ${n1(first.kg)} to ${n1(last.kg)} kg">
+      <polyline points="${pts}" fill="none" stroke="var(--burn)" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+      ${wts.map((x, i) => i === wts.length - 1 ? `<circle cx="${pts.split(" ")[i].split(",")[0]}" cy="${pts.split(" ")[i].split(",")[1]}" r="5" fill="var(--burn)"/>` : "").join("")}
+    </svg>`;
+  }
+  return `<section class="card stack" aria-label="Weight">
+    <div class="row"><div><b>Weight</b><div class="muted">${last ? `Last: ${new Date(last.day).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}` : "Track it weekly"}</div></div>
+      <button class="outline small" id="logWeight">+ Log weight</button></div>
+    ${last ? `<div class="row" style="justify-content:flex-start;gap:12px;align-items:baseline">
+      <span class="big-k" style="font-size:34px">${n1(last.kg)} <small>kg</small></span>
+      ${wts.length >= 2 ? `<span class="${diff <= 0 ? "ok" : "danger"}" style="font-weight:600">${diff <= 0 ? "▼" : "▲"} ${n1(Math.abs(diff))} kg</span><span class="muted">in ${Math.max(1, Math.round((new Date(last.day) - new Date(first.day)) / 864e5))} days</span>` : ""}
+    </div>${spark}` : `<p class="muted">Log your weight to see your trend. Your daily budget updates automatically.</p>`}
+  </section>`;
+}
+
+function openWeightSheet(wts) {
+  const last = wts[wts.length - 1];
+  let kg = Number(last?.kg || profile.weight_kg) || 65;
+  const s = openSheet("Log weight", `
+    <div class="stepper">
+      <button type="button" class="step-btn" data-w="-0.1" aria-label="Minus 0.1 kg">${sv('<path d="M5 12h14"/>')}</button>
+      <input id="wVal" type="number" inputmode="decimal" step="0.1" min="30" max="300" value="${n1(kg)}" aria-label="Weight in kg">
+      <button type="button" class="step-btn" data-w="0.1" aria-label="Plus 0.1 kg">${sv('<path d="M12 5v14M5 12h14"/>')}</button>
+    </div>
+    <p class="muted center">kg · today. Best weighed in the morning, before breakfast.</p>
+    <p class="muted center" id="wBudget"></p>
+    <button class="primary block" id="wSave">Save weight</button>`);
+  const v = s.el.querySelector("#wVal");
+  const upd = () => { const nb = tdee({ ...profile, weight_kg: +v.value || kg }); s.el.querySelector("#wBudget").textContent = `New daily budget: ${n0(nb)} kcal`; };
+  s.el.querySelectorAll("[data-w]").forEach((b) => (b.onclick = () => { v.value = (Math.round(((+v.value || kg) + +b.dataset.w) * 10) / 10).toFixed(1); upd(); }));
+  v.oninput = upd; upd();
+  s.el.querySelector("#wSave").onclick = async () => {
+    const w = Math.round((+v.value) * 10) / 10;
+    if (!(w >= 30 && w <= 300)) return toast("Enter a weight between 30 and 300 kg");
+    const day = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+    const { error } = await sb.from("weights").upsert({ day, kg: w }, { onConflict: "user_id,day" });
+    if (error) return fail(error);
+    const budget = tdee({ ...profile, weight_kg: w });
+    const r2 = await sb.from("profiles").update({ weight_kg: w, budget_kcal: budget }).eq("id", user.id);
+    if (r2.error) return fail(r2.error);
+    profile.weight_kg = w; profile.budget_kcal = budget;
+    s.close(); toast(`${n1(w)} kg saved. Budget: ${n0(budget)} kcal`); route();
+  };
 }
 
 // ---------- STEP SYNC: run the user's Apple Shortcut, then come back ----------
@@ -466,7 +594,16 @@ async function snap() {
       </label>
       <input id="cam" type="file" accept="image/*" capture="environment" hidden>
       <div class="row" style="justify-content:center"><label for="cam" class="shutter" aria-label="Take photo" role="button" tabindex="0"></label></div>
-      <button class="outline block" id="manual">Skip photo, add dishes by hand</button>
+      <form class="card stack" id="sayForm">
+        <label for="sayText"><b style="color:var(--ink);font-size:15px">Or just say it</b></label>
+        <div class="say-row">
+          <textarea id="sayText" rows="2" placeholder="Trưa nay ăn 1 tô phở bò với ly trà đá…" aria-label="Describe what you ate"></textarea>
+          <button type="button" class="mic" id="micBtn" aria-label="Speak your meal">${sv('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>')}</button>
+        </div>
+        <button class="primary block" id="sayGo">Count the kcal</button>
+        <p class="muted" id="sayHint">Tap the mic, or use the 🎤 on your keyboard.</p>
+      </form>
+      <button class="outline block" id="manual">Pick dishes from the list</button>
       ${recent.length ? `<h2>Eat it again</h2><div class="chips">${recent.map((m, i) => `<button class="chip" data-recent="${i}">${esc(m.name)} · ${n0(m.kcal)}</button>`).join("")}</div>` : ""}`;
     $$("[data-recent]").forEach((b) => (b.onclick = () => {
       const m = recent[+b.dataset.recent];
@@ -481,6 +618,25 @@ async function snap() {
       analyze();
     };
     $("#manual").onclick = () => { s.step = "detect"; s.photo = null; s.items = []; route(); };
+    $("#sayForm").onsubmit = (e) => {
+      e.preventDefault();
+      const t = $("#sayText").value.trim();
+      if (t.length < 3) return toast("Tell me what you ate first");
+      s.step = "detect"; s.photo = null; s.items = []; s.said = t; route();
+      analyze(t);
+    };
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const mic = $("#micBtn");
+    if (!SR) { mic.hidden = true; $("#sayHint").textContent = "Tip: tap the 🎤 on your keyboard to speak."; }
+    else mic.onclick = () => {
+      const rec = new SR(); rec.lang = "vi-VN"; rec.interimResults = true; rec.continuous = false;
+      const box = $("#sayText"); const before = box.value ? box.value + " " : "";
+      mic.classList.add("on"); $("#sayHint").textContent = "Listening… speak now";
+      rec.onresult = (ev) => { box.value = before + [...ev.results].map((x) => x[0].transcript).join(" "); };
+      rec.onerror = () => toast("Couldn’t hear you. Try the keyboard 🎤 instead.");
+      rec.onend = () => { mic.classList.remove("on"); $("#sayHint").textContent = "Check the text, then tap Count the kcal."; };
+      rec.start();
+    };
     return;
   }
 
@@ -489,6 +645,7 @@ async function snap() {
     app.innerHTML = `
       <div class="row"><h1>${s.analyzing ? "Looking at your meal…" : s.items.length ? `We spotted ${s.items.length}` : "What did you eat?"}</h1><span class="muted">Step 2 of 3</span></div>
       ${s.photo ? `<img class="photo" src="data:image/jpeg;base64,${s.photo}" alt="Your meal">` : ""}
+      ${!s.photo && s.said ? `<div class="card"><span class="muted">You said</span><p>“${esc(s.said)}”</p></div>` : ""}
       ${s.items.length ? `<p class="muted">Adjust the portions. Photos can’t see oil and sugar.</p>` : ""}
       ${s.items.map((it, idx) => `
         <div class="card stack">
@@ -564,19 +721,19 @@ async function snap() {
   // keep the card on screen; next visit to Snap starts fresh
 }
 
-async function analyze() {
+async function analyze(text) {
   const s = snapState; s.analyzing = true; route();
   try {
-    const { data, error } = await sb.functions.invoke("analyze-meal", { body: { image: s.photo, media_type: "image/jpeg" } });
+    const { data, error } = await sb.functions.invoke("analyze-meal", { body: text ? { text } : { image: s.photo, media_type: "image/jpeg" } });
     if (error) throw error;
     if (data.error) throw new Error(data.error);
     s.items = (data.items || []).map((i) => ({ name: i.name, kcal: i.kcal, size: "M" })); s.provider = data.provider;
-    if (!s.items.length) toast("No food spotted. Add dishes by hand.");
+    if (!s.items.length) toast(text ? "Couldn’t find food in that. Try naming the dishes." : "No food spotted. Add dishes by hand.");
   } catch (e) {
     console.error(e);
     let msg = e.message || "";
     try { if (e.context?.json) msg = (await e.context.json()).error || msg; } catch { /* keep message */ }
-    toast(`AI couldn’t read the photo (${msg.slice(0, 80)}). Add dishes by hand.`);
+    toast(`AI couldn’t read that (${msg.slice(0, 80)}). Add dishes by hand.`);
   } finally { s.analyzing = false; if (snapState === s && s.step === "detect") route(); }
 }
 
@@ -765,6 +922,7 @@ const ICON = {
   phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
   shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   out: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
   chev: '<path d="M9 6l6 6-6 6"/>',
 };
 const ic = (k, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
@@ -825,6 +983,11 @@ async function profileView() {
     <h2 class="set-h">Tracking</h2>
     <div class="set-group">
       ${row("rowSteps", "steps", "var(--tint-burn)", "Step sync", lastSync ? `<span class="ok">Connected</span>` : "Set up")}
+    </div>
+
+    <h2 class="set-h">Reminders</h2>
+    <div class="set-group">
+      ${row("rowNotif", "bell", "#FFF1D2", "Notifications", pushState())}
     </div>
 
     <h2 class="set-h">Privacy &amp; preferences</h2>
@@ -916,6 +1079,7 @@ async function profileView() {
   };
 
   $("#rowInstall").onclick = () => showInstallGuide(true);
+  $("#rowNotif").onclick = () => openNotifSheet();
   const ad = $("#rowAdmin"); if (ad) ad.onclick = () => { location.hash = "#admin"; };
   $("#serious").onclick = async () => {
     const v = !profile.serious_mode;
