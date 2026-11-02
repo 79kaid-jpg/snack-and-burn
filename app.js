@@ -57,8 +57,16 @@ const DISHES = [
   ["Cà phê sữa đá", 170], ["Bạc xỉu", 200], ["Trà sữa trân châu", 350], ["Nước mía", 180], ["Chè ba màu", 300],
 ];
 
+let dishCache = null;
+async function loadDishes(force) {
+  if (dishCache && !force) return dishCache;
+  const { data, error } = await sb.from("dishes").select("name,kcal").eq("active", true).order("name");
+  dishCache = !error && data.length ? data.map((d) => [d.name, d.kcal]) : DISHES;
+  return dishCache;
+}
+
 // ---------- routing ----------
-const VIEWS = { home, snap, challenges, friends, profileView };
+const VIEWS = { home, snap, challenges, friends, profileView, admin };
 let snapState = null;
 
 async function route() {
@@ -67,11 +75,17 @@ async function route() {
   if (!user) { tabs.hidden = true; return login(); }
   if (!profile || profile.id !== user.id) {
     const { data: p, error } = await sb.from("profiles")
-      .select("id,display_name,sex,age,height_cm,weight_kg,activity,budget_kcal,visibility,serious_mode,invite_code,onboarded")
+      .select("id,display_name,sex,age,height_cm,weight_kg,activity,budget_kcal,visibility,serious_mode,invite_code,onboarded,is_admin,blocked")
       .eq("id", user.id).single();
     if (error) return fail(error);
     profile = p;
     await redeemInvite();
+  }
+  if (profile.blocked) {
+    tabs.hidden = true;
+    app.innerHTML = `<h1>Account paused</h1><div class="card stack"><p>Your account has been paused by the Snack &amp; Burn team.</p><p class="muted">If you think this is a mistake, contact the app admin.</p></div><button class="outline block" id="out">Sign out</button>`;
+    $("#out").onclick = async () => { await sb.auth.signOut(); };
+    return;
   }
   if (!profile.onboarded) { tabs.hidden = true; return onboarding(); }
   tabs.hidden = false;
@@ -276,7 +290,7 @@ async function snap() {
         </div>`).join("")}
       <form id="add" class="card stack">
         <label>Add a dish<input name="name" list="dishes" placeholder="e.g. Phở bò" autocomplete="off"></label>
-        <datalist id="dishes">${DISHES.map(([d]) => `<option value="${esc(d)}">`).join("")}</datalist>
+        <datalist id="dishes">${(await loadDishes()).map(([d]) => `<option value="${esc(d)}">`).join("")}</datalist>
         <div class="row"><label style="flex:1">kcal (medium portion)<input name="kcal" type="number" inputmode="numeric" min="0"></label><button class="outline small" style="align-self:flex-end">Add</button></div>
       </form>
       <div class="row"><span>Meal total</span><b>${n0(total)} kcal</b></div>
@@ -286,7 +300,8 @@ async function snap() {
     $$("[data-z]").forEach((b) => (b.onclick = () => { s.items[b.dataset.i].size = b.dataset.z; route(); }));
     $$("[data-rm]").forEach((b) => (b.onclick = () => { s.items.splice(+b.dataset.rm, 1); route(); }));
     const add = $("#add");
-    add.name.oninput = () => { const hit = DISHES.find(([d]) => d === add.name.value); if (hit) add.kcal.value = hit[1]; };
+    const dl = await loadDishes();
+    add.name.oninput = () => { const hit = dl.find(([d]) => d === add.name.value); if (hit) add.kcal.value = hit[1]; };
     add.onsubmit = (e) => {
       e.preventDefault();
       const name = add.name.value.trim(); const kcal = +add.kcal.value;
@@ -377,7 +392,7 @@ async function challenges(q) {
     rpc("friends_week"),
   ]);
   if (error) throw error;
-  const shown = list.filter((c) => c.metric === challengeMetric);
+  const shown = list.filter((c) => c.metric === challengeMetric).sort((a, b) => (b.official ? 1 : 0) - (a.official ? 1 : 0));
   const boards = await Promise.all(shown.map((c) => rpc("challenge_leaderboard", { cid: c.id })));
   const bd = badges[0] || { total_km: 0, challenge_wins: 0, streak: 0 };
   const preselect = q.get("with");
@@ -416,11 +431,12 @@ async function challenges(q) {
       const gap = meIdx > 0 ? `${fmt(lead.score - rows[meIdx].score)} ${unit} to take the lead.` : meIdx === 0 ? "You’re leading. Keep it up!" : "";
       return `
       <section class="hero" style="gap:4px">
-        <span class="muted">${(new Date(c.ends_at) - new Date(c.starts_at)) / 864e5 === 7 ? "Weekly" : "Custom"} · ${ended ? "finished" : `ends in ${daysLeft(c)} day${daysLeft(c) === 1 ? "" : "s"}`}</span>
+        <span class="muted">${c.official ? "Official event" : (new Date(c.ends_at) - new Date(c.starts_at)) / 864e5 === 7 ? "Weekly" : "Custom"} · ${ended ? "finished" : `ends in ${daysLeft(c)} day${daysLeft(c) === 1 ? "" : "s"}`}</span>
         <span class="display" style="font-size:24px;font-weight:500">${esc(c.name)}</span>
-        <span class="muted">${meIdx >= 0 ? `You’re #${meIdx + 1}. ` : ""}${gap}</span>
+        <span class="muted">${meIdx >= 0 ? `You’re #${meIdx + 1}. ` : ""}${gap}${meIdx < 0 ? `${rows.length} taking part.` : ""}</span>
+        ${meIdx < 0 && c.official && !ended ? `<button class="primary" style="margin-top:8px" data-join="${c.id}">Join event</button>` : ""}
       </section>
-      <div class="list">${rows.map((r, j) => `
+      <div class="list">${rows.slice(0, 10).map((r, j) => `
         <div class="row" style="${r.user_id === user.id ? "font-weight:700" : ""}">
           <div class="row" style="justify-content:flex-start"><span class="display" style="width:24px;color:var(--muted)">${j + 1}</span><span class="avatar" style="background:${COLORS[j % 5]}">${initial(r.display_name)}</span>${r.user_id === user.id ? "You" : esc(r.display_name)}</div>
           <b>${fmt(r.score)} ${unit}</b></div>`).join("")}</div>`;
@@ -435,6 +451,9 @@ async function challenges(q) {
     </div>`;
 
   $$("[data-m]").forEach((b) => (b.onclick = () => { challengeMetric = b.dataset.m; route(); }));
+  $$("[data-join]").forEach((b) => (b.onclick = async () => {
+    try { await rpc("join_challenge", { cid: b.dataset.join }); toast("You're in! Go get it."); route(); } catch (e) { fail(e); }
+  }));
   const f = $("#create");
   $("#new").onclick = () => { f.hidden = !f.hidden; };
   f.len.onchange = () => { $("#custom").hidden = f.len.value !== "custom"; };
@@ -545,6 +564,7 @@ async function profileView() {
       <p><b>Apple Health, Apple Watch &amp; Garmin</b></p>
       <p class="muted">Web apps can’t read Apple Health directly. Automatic sync arrives with the native iOS app. For now, log runs from Home in a few taps.</p>
     </div>
+    ${profile.is_admin ? `<a class="btn primary block" href="#admin">Open Admin</a>` : ""}
     <button class="outline block" id="out">Sign out</button>`;
   wireStats(() => { toast("Saved. New budget: " + n0(profile.budget_kcal) + " kcal"); route(); });
   $("#serious").onclick = async () => {
@@ -555,6 +575,146 @@ async function profileView() {
   };
   $("#toNearby").onclick = () => { friendsTab = "nearby"; };
   $("#out").onclick = async () => { await sb.auth.signOut(); location.hash = ""; };
+}
+
+// ---------- ADMIN ----------
+let adminTab = "stats";
+async function admin() {
+  if (!profile.is_admin) { location.hash = "#home"; return; }
+  tabs.querySelectorAll("a").forEach((a) => a.classList.toggle("active", a.dataset.tab === "profile"));
+  let body = "";
+
+  if (adminTab === "stats") {
+    const days = await rpc("admin_stats", { days: 14 });
+    const users = await rpc("admin_users");
+    const sum = (k) => days.reduce((t, d) => t + Number(d[k]), 0);
+    const chart = (key, color, label, fmt = n0) => {
+      const max = Math.max(1, ...days.map((d) => Number(d[key])));
+      const w = 320, h = 90, bw = w / days.length;
+      return `<div class="card stack"><div class="row"><b>${label}</b><span class="muted">14 days · ${fmt(sum(key))}</span></div>
+        <svg viewBox="0 0 ${w} ${h + 16}" width="100%" role="img" aria-label="${label} per day">
+          ${days.map((d, i) => { const v = Number(d[key]); const bh = (v / max) * h;
+            return `<rect x="${i * bw + 2}" y="${h - bh}" width="${bw - 4}" height="${Math.max(bh, v ? 2 : 0)}" rx="3" fill="${color}"><title>${d.day}: ${fmt(v)}</title></rect>`; }).join("")}
+          <text x="0" y="${h + 14}" font-size="10" fill="#5C5348">${days[0].day.slice(5)}</text>
+          <text x="${w}" y="${h + 14}" font-size="10" fill="#5C5348" text-anchor="end">${days[days.length - 1].day.slice(5)}</text>
+        </svg></div>`;
+    };
+    body = `
+      <div class="grid g2">
+        <div class="tile" style="background:var(--tint-snack)"><b>${users.length}</b>Total users</div>
+        <div class="tile" style="background:var(--tint-ok)"><b>${days.length ? days[days.length - 1].active : 0}</b>Active today</div>
+        <div class="tile" style="background:var(--tint-burn)"><b>${n0(sum("meals"))}</b>Meals · 14 days</div>
+        <div class="tile" style="background:#E7F1FB"><b>${n1(sum("km"))}</b>km run · 14 days</div>
+      </div>
+      ${chart("active", "#1D7A43", "Active users")}
+      ${chart("signups", "#FFB020", "New sign-ups")}
+      ${chart("meals", "#D93A1E", "Meals logged")}
+      ${chart("km", "#2F6FB0", "Km run", n1)}`;
+  }
+
+  if (adminTab === "users") {
+    const users = await rpc("admin_users");
+    body = `<p class="muted">${users.length} users</p><div class="list">${users.map((u) => `
+      <div class="row" style="align-items:flex-start">
+        <div style="min-width:0"><div>${esc(u.display_name)}${u.is_admin ? ` <span class="muted">· admin</span>` : ""}${u.blocked ? ` <b class="danger">· blocked</b>` : ""}</div>
+          <div class="muted" style="overflow-wrap:anywhere">${esc(u.email)}</div>
+          <div class="muted">Joined ${new Date(u.created_at).toLocaleDateString("en-GB")} · ${u.meals} meals · ${n1(u.km)} km</div></div>
+        ${u.id === user.id ? "" : `<div class="stack" style="gap:6px">
+          <button class="outline small" data-block="${u.id}" data-b="${!u.blocked}">${u.blocked ? "Unblock" : "Block"}</button>
+          <button class="outline small danger" data-delete="${u.id}" data-name="${esc(u.display_name)}">Delete</button></div>`}
+      </div>`).join("")}</div>`;
+  }
+
+  if (adminTab === "dishes") {
+    const { data: dishes, error } = await sb.from("dishes").select("*").order("name");
+    if (error) throw error;
+    body = `
+      <form id="dish" class="card stack">
+        <b>Add a dish</b>
+        <div class="grid g2"><label>Name<input name="name" required maxlength="80" placeholder="Bún mắm"></label>
+        <label>kcal (medium portion)<input name="kcal" type="number" inputmode="numeric" min="0" required></label></div>
+        <button class="primary">Add dish</button>
+      </form>
+      <p class="muted">${dishes.length} dishes. Edit kcal and tap Save. Hidden dishes don’t show to users.</p>
+      <div class="list">${dishes.map((d) => `
+        <div class="row">
+          <div style="flex:1;min-width:0"><div style="${d.active ? "" : "color:var(--muted);text-decoration:line-through"}">${esc(d.name)}</div></div>
+          <input aria-label="kcal for ${esc(d.name)}" type="number" min="0" value="${d.kcal}" data-kcal="${d.id}" style="width:84px">
+          <button class="outline small" data-save="${d.id}">Save</button>
+          <button class="outline small" data-toggle="${d.id}" data-active="${d.active}">${d.active ? "Hide" : "Show"}</button>
+        </div>`).join("")}</div>`;
+  }
+
+  if (adminTab === "events") {
+    const { data: evs, error } = await sb.from("challenges").select("*").eq("official", true).order("starts_at", { ascending: false });
+    if (error) throw error;
+    const counts = await Promise.all(evs.map((e) => rpc("challenge_leaderboard", { cid: e.id })));
+    body = `
+      <form id="event" class="card stack">
+        <b>New official event</b>
+        <label>Name<input name="name" required maxlength="60" placeholder="Saigon Run Week"></label>
+        <div class="grid g2">
+          <label>Type<select name="metric"><option value="km">Most km run</option><option value="kcal">Most kcal burned</option></select></label>
+          <label>Starts<input name="start" type="date" required></label>
+          <label>Ends<input name="end" type="date" required></label>
+        </div>
+        <button class="primary">Publish event</button>
+        <p class="muted">Every user sees it on Challenges and can join.</p>
+      </form>
+      ${evs.length ? `<div class="list">${evs.map((e, i) => `
+        <div class="row"><div><div>${esc(e.name)}</div>
+          <div class="muted">${e.metric === "km" ? "Most km" : "Most kcal"} · ${new Date(e.starts_at).toLocaleDateString("en-GB")}–${new Date(e.ends_at).toLocaleDateString("en-GB")} · ${counts[i].length} joined</div></div>
+          <button class="outline small danger" data-del-ev="${e.id}">Delete</button></div>`).join("")}</div>`
+        : `<p class="muted">No official events yet.</p>`}`;
+  }
+
+  app.innerHTML = `
+    <div class="row"><h1>Admin</h1><a class="btn outline small" href="#profile">Done</a></div>
+    <div class="seg" role="group" aria-label="Admin section">
+      ${[["stats", "Stats"], ["users", "Users"], ["dishes", "Dishes"], ["events", "Events"]].map(([k, t]) => `<button aria-pressed="${adminTab === k}" data-at="${k}">${t}</button>`).join("")}
+    </div>
+    ${body}`;
+
+  $$("[data-at]").forEach((b) => (b.onclick = () => { adminTab = b.dataset.at; route(); }));
+  $$("[data-block]").forEach((b) => (b.onclick = async () => {
+    try { await rpc("admin_set_blocked", { uid: b.dataset.block, b: b.dataset.b === "true" }); route(); } catch (e) { fail(e); }
+  }));
+  $$("[data-delete]").forEach((b) => (b.onclick = async () => {
+    if (!confirm(`Delete ${b.dataset.name} and all their data? This cannot be undone.`)) return;
+    try { await rpc("admin_delete_user", { uid: b.dataset.delete }); toast("User deleted"); route(); } catch (e) { fail(e); }
+  }));
+  const dish = $("#dish");
+  if (dish) dish.onsubmit = async (e) => {
+    e.preventDefault();
+    const { error } = await sb.from("dishes").insert({ name: dish.name.value.trim(), kcal: +dish.kcal.value });
+    if (error) return fail(error.code === "23505" ? new Error("That dish already exists") : error);
+    dishCache = null; toast("Dish added"); route();
+  };
+  $$("[data-save]").forEach((b) => (b.onclick = async () => {
+    const v = +app.querySelector(`[data-kcal="${b.dataset.save}"]`).value;
+    const { error } = await sb.from("dishes").update({ kcal: v, updated_at: new Date().toISOString() }).eq("id", b.dataset.save);
+    if (error) return fail(error);
+    dishCache = null; toast("Saved");
+  }));
+  $$("[data-toggle]").forEach((b) => (b.onclick = async () => {
+    const { error } = await sb.from("dishes").update({ active: b.dataset.active !== "true" }).eq("id", b.dataset.toggle);
+    if (error) return fail(error);
+    dishCache = null; route();
+  }));
+  const ev = $("#event");
+  if (ev) ev.onsubmit = async (e) => {
+    e.preventDefault();
+    const starts = new Date(ev.start.value + "T00:00"); const ends = new Date(ev.end.value + "T23:59");
+    if (ends <= starts) return toast("End date must be after start");
+    try {
+      await rpc("create_official_challenge", { p_name: ev.name.value.trim(), p_metric: ev.metric.value, p_starts: starts.toISOString(), p_ends: ends.toISOString() });
+      toast("Event published"); route();
+    } catch (err) { fail(err); }
+  };
+  $$("[data-del-ev]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Delete this event for everyone?")) return;
+    try { await rpc("delete_official_challenge", { cid: b.dataset.delEv }); route(); } catch (e) { fail(e); }
+  }));
 }
 
 // ---------- PWA ----------

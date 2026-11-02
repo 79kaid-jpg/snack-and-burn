@@ -10,6 +10,7 @@ Built as an installable web app (PWA) for iPhone, with **Supabase** (database, s
 - **Home:** daily Balance Meter (budget, snacked, burned, net), today's meals and burns, streak.
 - **Challenges:** most km run or most kcal burned, weekly or custom dates, leaderboard, badges.
 - **Friends:** invite via share sheet (Zalo, Messenger…), add by code, find people within 2 km, choose who sees you (Everyone / Friends only / Off).
+- **Admin** (for emails in `admin_emails`): stats dashboard, manage users (block/delete), edit the dish list, publish official events anyone can join.
 - **Profile:** body stats → daily budget (Mifflin-St Jeor × activity), serious mode (no jokes).
 
 ## Setup (about 15 minutes)
@@ -39,6 +40,9 @@ Without this step the app still works: users add dishes by hand from the Vietnam
 
 ### 4. Install on iPhone
 Open the site in Safari → **Share → Add to Home Screen**.
+
+## Admins
+Admins are set by email in the `admin_emails` table (79kaid@gmail.com by default). New sign-ups with a listed email become admins automatically; open **Profile → Open Admin**.
 
 ## Notes and limits
 - Calories from photos are estimates (±20%); the app labels them that way.
