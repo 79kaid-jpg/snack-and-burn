@@ -187,13 +187,13 @@ function statsForm(p, submitLabel) {
     <button class="primary block">${submitLabel}</button>
   </form>`;
 }
-function wireStats(onDone) {
-  const f = $("#stats");
+function wireStats(onDone, root = app) {
+  const f = root.querySelector("#stats");
   const read = () => {
     const d = Object.fromEntries(new FormData(f));
     return { display_name: d.display_name.trim(), sex: d.sex, age: +d.age, height_cm: +d.height_cm, weight_kg: +d.weight_kg, activity: +d.activity };
   };
-  f.oninput = () => { const v = read(); if (v.age && v.height_cm && v.weight_kg) $("#budget").textContent = n0(tdee(v)); };
+  f.oninput = () => { const v = read(); if (v.age && v.height_cm && v.weight_kg) root.querySelector("#budget").textContent = n0(tdee(v)); };
   f.onsubmit = async (e) => {
     e.preventDefault();
     const v = read();
@@ -756,88 +756,174 @@ async function friends() {
 }
 
 // ---------- PROFILE ----------
+const ICON = {
+  body: '<path d="M12 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM8 21l1.5-7L7 9h10l-2.5 5L16 21"/>',
+  steps: '<path d="M7 15c-1.5 0-2.5-1.5-2.5-4S5.5 5 7.5 5 10 7 10 9.5 9 15 7 15zM5 18h4M17 19c-2 0-3-5.5-3-8S15 5 16.5 5 19.5 6.5 19.5 9s-1 4-2.5 4M15 22h4"/>',
+  pin: '<path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.5C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5s1.2 1.5 3.5 1.5 3.5-1.5 3.5-1.5M9 9.5h.01M15 9.5h.01"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  out: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  chev: '<path d="M9 6l6 6-6 6"/>',
+};
+const ic = (k, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
+
+// generic bottom sheet: returns the sheet element; close() removes it
+function openSheet(title, html) {
+  const wrap = document.createElement("div");
+  wrap.className = "sheet-backdrop";
+  wrap.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    <div class="row"><h1 style="font-size:22px">${esc(title)}</h1><button class="icon-btn" data-close aria-label="Close">${sv('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
+    ${html}</div>`;
+  document.body.appendChild(wrap);
+  const prev = document.activeElement;
+  const close = () => { wrap.remove(); prev?.focus?.(); };
+  wrap.querySelector("[data-close]").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  wrap.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  wrap.querySelector("[data-close]").focus();
+  return { el: wrap.querySelector(".sheet"), close };
+}
+
 async function profileView() {
+  const [badges, tokRes] = await Promise.all([
+    rpc("my_badges").catch(() => []),
+    sb.from("step_tokens").select("last_sync").maybeSingle(),
+  ]);
+  const bd = badges[0] || { total_km: 0, challenge_wins: 0, streak: 0 };
+  const lastSync = tokRes.data?.last_sync;
+  const visLabel = { everyone: "Everyone", friends: "Friends only", off: "Hidden" }[profile.visibility];
+  const sexLabel = profile.sex === "female" ? "F" : "M";
+  const row = (id, icon, tint, title, value, extra = "") => `
+    <button class="set-row" id="${id}" ${extra}>
+      <span class="set-ic" style="background:${tint}">${ic(icon, "ic-sm")}</span>
+      <span class="set-t">${title}</span>
+      <span class="set-v">${value}</span>${ic("chev", "ic-sm set-chev")}
+    </button>`;
+
   app.innerHTML = `
-    <div class="row" style="justify-content:flex-start"><span class="avatar" style="width:56px;height:56px;font-size:24px">${initial(profile.display_name)}</span>
-      <div><h1>${esc(profile.display_name)}</h1><p class="muted">${esc(user.email)}</p></div></div>
-    <h2>Body &amp; daily budget</h2>
-    ${statsForm(profile, "Save")}
-    <h2>Privacy &amp; preferences</h2>
-    <div class="list">
-      <div class="row"><div><div>Serious mode</div><div class="muted">${profile.serious_mode ? "On · no jokes, just numbers" : "Off · cheeky comments on"}</div></div>
-        <button class="switch" id="serious" aria-label="Serious mode" aria-pressed="${profile.serious_mode}"></button></div>
-      <div class="row"><div><div>Show me nearby</div><div class="muted">${{ everyone: "Everyone within 2 km", friends: "Friends only", off: "Hidden" }[profile.visibility]}</div></div>
-        <a class="btn outline small" href="#friends" id="toNearby">Change</a></div>
+    <section class="prof-hero">
+      <span class="avatar prof-av">${initial(profile.display_name)}</span>
+      <div style="min-width:0">
+        <h1 style="overflow-wrap:anywhere">${esc(profile.display_name)}</h1>
+        <p class="muted" style="color:#E8D9C2;overflow-wrap:anywhere">${esc(user.email)}${profile.is_admin ? " · Admin" : ""}</p>
+      </div>
+      <div class="prof-stats">
+        <div><b>${bd.streak}</b><span>day streak</span></div>
+        <div><b>${n1(bd.total_km)}</b><span>km run</span></div>
+        <div><b>${bd.challenge_wins}</b><span>wins</span></div>
+      </div>
+    </section>
+
+    <button class="budget-card" id="editBody">
+      <div><span class="muted">Daily budget</span><div class="big-k">${n0(profile.budget_kcal)} <small>kcal</small></div>
+        <span class="muted">${n1(profile.weight_kg)} kg · ${n0(profile.height_cm)} cm · ${profile.age} · ${sexLabel}</span></div>
+      <span class="btn outline small" aria-hidden="true">Edit</span>
+    </button>
+
+    <h2 class="set-h">Tracking</h2>
+    <div class="set-group">
+      ${row("rowSteps", "steps", "var(--tint-burn)", "Step sync", lastSync ? `<span class="ok">Connected</span>` : "Set up")}
     </div>
-    <h2>Step sync</h2>
-    <div class="card stack" id="stepSync">
-      <p><b>Apple Health, Apple Watch &amp; Garmin steps</b></p>
-      <p class="muted">An Apple Shortcut sends today’s steps to Snack &amp; Burn automatically. Garmin steps work too, through Apple Health.</p>
-      <div class="row" id="syncStatus"><span class="muted">Loading…</span></div>
-      <button class="primary block" id="showSync">Set up step sync</button>
-      <div id="syncGuide" class="stack" hidden></div>
+
+    <h2 class="set-h">Privacy &amp; preferences</h2>
+    <div class="set-group">
+      ${row("rowNearby", "pin", "#E7F1FB", "Show me nearby", visLabel)}
+      <div class="set-row">
+        <span class="set-ic" style="background:var(--tint-snack)">${ic("smile", "ic-sm")}</span>
+        <span class="set-t">Serious mode<span class="muted" style="display:block;font-size:12px">${profile.serious_mode ? "No jokes, just numbers" : "Cheeky comments on"}</span></span>
+        <button class="switch" id="serious" aria-label="Serious mode" aria-pressed="${profile.serious_mode}"></button>
+      </div>
     </div>
-    ${profile.is_admin ? `<a class="btn primary block" href="#admin">Open Admin</a>` : ""}
-    <h2>Password</h2>
-    <form id="pw" class="card stack">
-      <label>New password<input type="password" name="pw" minlength="6" required autocomplete="new-password" placeholder="At least 6 characters"></label>
-      <button class="outline block">Set password</button>
-      <p class="muted">Then sign in with email + password, no email link needed.</p>
-    </form>
-    <button class="outline block" id="out">Sign out</button>
-    <button class="outline block" id="howInstall">How to add to Home Screen</button>
+
+    <h2 class="set-h">Account</h2>
+    <div class="set-group">
+      ${row("rowPw", "lock", "#EDE9E3", "Password", "Change")}
+      ${row("rowInstall", "phone", "var(--tint-ok)", "Add to Home Screen", "")}
+      ${profile.is_admin ? row("rowAdmin", "shield", "#EFEDFF", "Admin", "") : ""}
+    </div>
+
+    <button class="set-row set-out" id="out">${ic("out", "ic-sm")}<span>Sign out</span></button>
     <p class="version">Snack &amp; Burn · version ${esc(APP_VERSION)}</p>`;
-  $("#howInstall").onclick = () => showInstallGuide(true);
-  const { data: tok } = await sb.from("step_tokens").select("last_sync").maybeSingle();
-  $("#syncStatus").innerHTML = tok?.last_sync
-    ? `<span class="ok">Connected</span><span class="muted">Last sync ${new Date(tok.last_sync).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>`
-    : `<span class="muted">Not set up yet</span>`;
-  $("#showSync").onclick = async () => {
-    const g = $("#syncGuide");
-    if (!g.hidden) { g.hidden = true; return; }
+
+  // body & budget sheet
+  $("#editBody").onclick = () => {
+    const s = openSheet("Body & daily budget", statsForm(profile, "Save"));
+    wireStats(() => { s.close(); toast("Saved. New budget: " + n0(profile.budget_kcal) + " kcal"); route(); }, s.el);
+  };
+
+  // nearby visibility sheet
+  $("#rowNearby").onclick = () => {
+    const s = openSheet("Who can see me nearby", `
+      <p class="muted">People within about 2 km. Only your rough area is used, never your exact spot.</p>
+      <div class="set-group">${[["everyone", "Everyone", "Anyone using Snack & Burn nearby"], ["friends", "Friends only", "Only people you’ve added"], ["off", "Hidden", "Nobody sees you nearby"]]
+        .map(([v, t, d]) => `<button class="set-row" data-vis="${v}" role="radio" aria-checked="${profile.visibility === v}"><span class="set-t">${t}<span class="muted" style="display:block;font-size:12px">${d}</span></span>${profile.visibility === v ? `<span class="ok">${sv('<path d="M5 12l5 5 9-10"/>')}</span>` : ""}</button>`).join("")}</div>`);
+    s.el.querySelectorAll("[data-vis]").forEach((b) => (b.onclick = async () => {
+      const { error } = await sb.from("profiles").update({ visibility: b.dataset.vis }).eq("id", user.id);
+      if (error) return fail(error);
+      profile.visibility = b.dataset.vis; s.close(); route();
+    }));
+  };
+
+  // password sheet
+  const openPw = () => {
+    const s = openSheet("Password", `
+      <form id="pw" class="stack">
+        <label>New password<input type="password" name="pw" minlength="6" required autocomplete="new-password" placeholder="At least 6 characters"></label>
+        <button class="primary block">Save password</button>
+        <p class="muted">Sign in with your email and this password. No email link needed.</p>
+      </form>`);
+    const pw = s.el.querySelector("#pw"); pw.pw.focus();
+    pw.onsubmit = async (e) => {
+      e.preventDefault();
+      const { error } = await sb.auth.updateUser({ password: pw.pw.value });
+      if (error) return fail(error);
+      s.close(); toast("Password saved");
+    };
+  };
+  $("#rowPw").onclick = openPw;
+  if (location.hash.includes("setpw=1")) { history.replaceState(null, "", "#profile"); openPw(); }
+
+  // step sync sheet
+  $("#rowSteps").onclick = async () => {
     let code;
     try { code = await rpc("my_step_token", { regenerate: false }); } catch (e) { return fail(e); }
     const url = `${cfg.SUPABASE_URL}/functions/v1/sync-steps`;
-    g.innerHTML = `
+    const s = openSheet("Step sync", `
+      <div class="card stack">
+        <div class="row"><b>Status</b>${lastSync ? `<span class="ok">Connected · ${new Date(lastSync).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>` : `<span class="muted">Not set up yet</span>`}</div>
+        <p class="muted">An Apple Shortcut reads today’s steps from Apple Health (incl. Apple Watch and Garmin) and sends them here. Tap <b>Sync</b> on Home to run it.</p>
+      </div>
       <div class="step"><span class="num">1</span><div>Copy your two values (keep the code private):
-        <div class="stack" style="margin-top:8px">
-          <button class="outline small" data-copy="${esc(url)}">Copy web address</button>
-          <button class="outline small" data-copy="${esc(code)}">Copy sync code</button>
+        <div class="grid g2" style="margin-top:8px">
+          <button class="outline small" data-copy="${esc(url)}">Web address</button>
+          <button class="outline small" data-copy="${esc(code)}">Sync code</button>
         </div></div></div>
-      <div class="step"><span class="num">2</span><div>Open <b>Shortcuts</b> → <b>+</b> → name it <b>Snack &amp; Burn steps</b>.</div></div>
-      <div class="step"><span class="num">3</span><div>Add action <b>Find Health Samples</b>: Type <b>Steps</b>, Start Date <b>is today</b>.</div></div>
-      <div class="step"><span class="num">4</span><div>Add action <b>Calculate Statistics</b>: <b>Sum</b> of Health Samples.</div></div>
-      <div class="step"><span class="num">5</span><div>Add action <b>Get Contents of URL</b>: paste the web address. Tap ▸ Show More: Method <b>POST</b>, Request Body <b>JSON</b>, add fields:<br>
-        <span class="kbd">code</span> = your sync code (Text)<br><span class="kbd">steps</span> = <b>Statistics</b> (Number)</div></div>
-      <div class="step"><span class="num">6</span><div>Tap ▶ to test. Allow Health access when asked. You should see “steps saved”.</div></div>
-      <div class="step"><span class="num">7</span><div><b>Make it automatic:</b> Shortcuts → <b>Automation</b> → <b>+</b> → <b>Time of Day</b> (e.g. 21:00, Daily) → <b>Run Immediately</b> → pick this shortcut. Add a second one for when you open Snack &amp; Burn if you like.</div></div>
-      <label>Your shortcut’s name (for the Sync button on Home)<input id="scName" value="${esc(stepShortcutName())}" autocapitalize="off"></label>
-      <button class="outline small danger" id="newCode">Make a new code (old one stops working)</button>`;
-    g.hidden = false;
-    g.querySelector("#scName").onchange = (e) => { try { localStorage.setItem("snb_shortcut", e.target.value.trim()); } catch { /* ignore */ } toast("Saved"); };
-    g.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied"); }));
-    g.querySelector("#newCode").onclick = async () => {
+      <div class="step"><span class="num">2</span><div>In <b>Shortcuts</b>, make a new shortcut.</div></div>
+      <div class="step"><span class="num">3</span><div><b>Find Health Samples</b>: Type <b>Steps</b>, Start Date <b>is today</b>.</div></div>
+      <div class="step"><span class="num">4</span><div><b>Calculate Statistics</b>: <b>Sum</b>.</div></div>
+      <div class="step"><span class="num">5</span><div><b>Get Contents of URL</b>: the web address, Method <b>POST</b>, Body <b>JSON</b>: <span class="kbd">code</span> = sync code, <span class="kbd">steps</span> = Statistics.</div></div>
+      <div class="step"><span class="num">6</span><div>Tap ▶ to test and allow Health access.</div></div>
+      <label>Your shortcut’s name (used by the Sync button)<input id="scName" value="${esc(stepShortcutName())}" autocapitalize="off"></label>
+      <button class="outline block danger" id="newCode">Make a new sync code</button>`);
+    s.el.querySelector("#scName").onchange = (e) => { try { localStorage.setItem("snb_shortcut", e.target.value.trim()); } catch { /* ignore */ } toast("Saved"); };
+    s.el.querySelectorAll("[data-copy]").forEach((b) => (b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); toast("Copied"); }));
+    s.el.querySelector("#newCode").onclick = async () => {
       if (!confirm("Make a new sync code? You’ll need to paste it into your Shortcut again.")) return;
-      try { await rpc("my_step_token", { regenerate: true }); g.hidden = true; $("#showSync").click(); toast("New code ready"); } catch (e) { fail(e); }
+      try { await rpc("my_step_token", { regenerate: true }); s.close(); toast("New code ready. Open Step sync to copy it."); } catch (e) { fail(e); }
     };
   };
-  const pw = $("#pw");
-  pw.onsubmit = async (e) => {
-    e.preventDefault();
-    const { error } = await sb.auth.updateUser({ password: pw.pw.value });
-    if (error) return fail(error);
-    pw.reset(); toast("Password saved");
-  };
-  if (location.hash.includes("setpw=1")) { pw.scrollIntoView(); pw.pw.focus(); toast("Choose a new password"); }
-  wireStats(() => { toast("Saved. New budget: " + n0(profile.budget_kcal) + " kcal"); route(); });
+
+  $("#rowInstall").onclick = () => showInstallGuide(true);
+  const ad = $("#rowAdmin"); if (ad) ad.onclick = () => { location.hash = "#admin"; };
   $("#serious").onclick = async () => {
     const v = !profile.serious_mode;
     const { error } = await sb.from("profiles").update({ serious_mode: v }).eq("id", user.id);
     if (error) return fail(error);
     profile.serious_mode = v; route();
   };
-  $("#toNearby").onclick = () => { friendsTab = "nearby"; };
-  $("#out").onclick = async () => { await sb.auth.signOut(); location.hash = ""; };
+  $("#out").onclick = async () => { if (!confirm("Sign out of Snack & Burn?")) return; await sb.auth.signOut(); location.hash = ""; };
 }
 
 // ---------- ADMIN ----------

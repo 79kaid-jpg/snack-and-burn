@@ -143,3 +143,25 @@ main { gap: 12px; }
 
 #syncSteps { gap: 6px; padding: 0 12px; }
 #syncSteps .ic { width: 18px; height: 18px; }
+
+/* ---- Profile v2 ---- */
+.prof-hero { background: var(--ink); color: var(--cream); border-radius: 24px; padding: 18px; display: grid; grid-template-columns: 64px 1fr; gap: 14px; align-items: center; }
+.prof-av { width: 64px; height: 64px; font-size: 28px; font-family: Fredoka, sans-serif; color: var(--ink); }
+.prof-hero h1 { font-size: 24px; }
+.prof-stats { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, 1fr); background: #2A2420; border-radius: 16px; padding: 10px 0; }
+.prof-stats div { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.prof-stats div + div { border-left: 1px solid #3A332D; }
+.prof-stats b { font-family: Fredoka, sans-serif; font-weight: 500; font-size: 22px; color: var(--snack); }
+.prof-stats span { font-size: 12px; color: #E8D9C2; }
+.budget-card { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 12px; background: #fff; border: 0; border-radius: var(--r); padding: 14px 16px; text-align: left; font: inherit; color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.set-h { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 8px 4px -4px; }
+.set-group { background: #fff; border-radius: var(--r); overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.set-row { width: 100%; display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 14px; background: transparent; border: 0; border-radius: 0; font: inherit; font-size: 16px; font-weight: 500; color: var(--ink); text-align: left; }
+.set-group .set-row + .set-row { border-top: 1px solid var(--line); }
+.set-row:active { transform: none; background: var(--cream); }
+.set-ic { width: 32px; height: 32px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: var(--burn-ink); flex: none; }
+.set-t { flex: 1; min-width: 0; }
+.set-v { color: var(--muted); font-size: 14px; font-weight: 400; white-space: nowrap; }
+.set-chev { color: #B9AC98; }
+.set-out { background: #fff; border-radius: var(--r); justify-content: center; color: var(--burn-ink); box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+.sheet .set-group { box-shadow: none; border: 1px solid var(--line); }
