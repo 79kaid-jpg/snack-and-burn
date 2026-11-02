@@ -102,3 +102,21 @@ button:active, .btn:active, nav#tabs a:active, .chip:active { transform: scale(.
 }
 
 nav#tabs[hidden] { display: none; }
+
+/* ---- Log a burn sheet ---- */
+.sheet { max-height: 92vh; overflow-y: auto; }
+.act-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.act-tile { flex-direction: column; gap: 6px; min-height: 76px; padding: 8px 2px; border-radius: 16px; background: #fff; border: 2px solid #E8D9C2; color: var(--ink); font-size: 12px; font-weight: 600; }
+.act-tile[aria-checked="true"] { background: var(--ink); border-color: var(--ink); color: var(--snack); }
+.act-ic { width: 40px; height: 40px; border-radius: 50%; background: #fff; color: var(--burn-ink); display: flex; align-items: center; justify-content: center; flex: none; }
+.stepper { display: grid; grid-template-columns: 56px 1fr 56px; gap: 10px; align-items: center; }
+.stepper input { text-align: center; font-family: Fredoka, sans-serif; font-size: 34px; min-height: 64px; border-radius: 16px; }
+.step-btn { width: 56px; height: 56px; min-height: 56px; padding: 0; border-radius: 50%; background: var(--line); color: var(--ink); }
+.chip.on { background: var(--snack); border-color: var(--ink); }
+.burn-total { background: var(--ink); color: var(--cream); border-radius: 20px; padding: 16px 18px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.burn-total .muted { color: #E8D9C2; }
+.burn-total .outline { color: var(--cream); border-color: var(--cream); }
+.big-k { font-family: Fredoka, sans-serif; font-size: 40px; line-height: 1.1; }
+.big-k small { font-size: 18px; }
+select { appearance: none; -webkit-appearance: none; min-height: 48px; }
+input { min-height: 48px; }

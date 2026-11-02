@@ -258,41 +258,121 @@ async function home(q) {
     <div class="row"><b>${n0(m.kcal)}</b><button class="icon-btn" data-del-meal="${m.id}" aria-label="Remove ${esc(m.name)}"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
     : `<p class="muted">Nothing yet. Tap Snap to photograph your meal.</p>`}
 
-  <div class="row"><h2>Burns today</h2><button class="outline small" id="showLog">+ Log a burn</button></div>
-  <form id="log" class="card stack" ${q.get("log") ? "" : "hidden"}>
-    <div class="grid g2">
-      <label>Activity<select name="kind"><option value="run">Running</option><option value="walk">Walking</option><option value="rope">Jump rope</option><option value="cycle">Cycling</option><option value="other">Other</option></select></label>
-      <label>Distance (km)<input name="km" type="number" inputmode="decimal" step="0.1" min="0" value="${esc(q.get("km") || "")}"></label>
-      <label>Minutes<input name="min" type="number" inputmode="numeric" min="0"></label>
-      <label>kcal (auto)<input name="kcal" type="number" inputmode="numeric" min="0"></label>
-    </div>
-    <button class="primary block">Save burn</button>
-  </form>
+  <div class="row"><h2>Burns today</h2><button class="primary small" id="showLog">+ Log a burn</button></div>
   ${acts.data.length ? `<div class="list" style="background:var(--tint-burn)">${acts.data.map((a) => `
-    <div class="row"><div><div>${esc({ run: "Run", walk: "Walk", rope: "Jump rope", cycle: "Ride", other: "Workout" }[a.kind])}${a.distance_km ? ` · ${n1(a.distance_km)} km` : ""}${a.minutes ? ` · ${a.minutes} min` : ""}</div><div class="muted">${time(a.started_at)} · ${esc(a.source)}</div></div>
+    <div class="row"><div class="row" style="justify-content:flex-start;gap:12px"><span class="act-ic">${ACT[a.kind].icon}</span><div><div>${esc(ACT[a.kind].label)}${a.distance_km ? ` · ${n1(a.distance_km)} km` : ""}${a.minutes ? ` · ${a.minutes} min` : ""}</div><div class="muted">${time(a.started_at)} · ${esc(a.source)}</div></div></div>
     <div class="row"><b class="danger">−${n0(a.kcal)}</b><button class="icon-btn" data-del-act="${a.id}" aria-label="Remove activity"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
     : `<p class="muted">No burns yet today.</p>`}
   ${quip(["Every snack has a price. It’s paid in kilometres.", "Your shoes miss you.", "Balance is a verb. Go do it."])}`;
 
-  const log = $("#log");
-  $("#showLog").onclick = () => { log.hidden = !log.hidden; };
-  const est = () => {
-    const d = Object.fromEntries(new FormData(log)); const w = weight(); const km = +d.km || 0; const min = +d.min || 0;
-    const k = { run: km * w, walk: km * 0.5 * w, rope: (min * 12 * w) / 60, cycle: (min * 7 * w) / 60, other: (min * 6 * w) / 60 }[d.kind];
-    if (k) log.kcal.value = Math.round(k);
-  };
-  log.kind.onchange = est; log.km.oninput = est; log.min.oninput = est; est();
-  log.onsubmit = async (e) => {
-    e.preventDefault();
-    const d = Object.fromEntries(new FormData(log));
-    if (!(+d.kcal > 0)) return toast("Add distance or minutes first");
-    const { error } = await sb.from("activities").insert({ kind: d.kind, distance_km: +d.km || 0, minutes: +d.min || 0, kcal: Math.round(+d.kcal) });
-    if (error) return fail(error);
-    toast(profile.serious_mode ? "Saved" : "Burn logged. Flames everywhere.");
-    location.hash = "#home"; route();
-  };
+  $("#showLog").onclick = () => openBurnSheet();
+  if (q.get("log")) { history.replaceState(null, "", "#home"); openBurnSheet({ kind: "run", km: +q.get("km") || 0 }); }
   $$("[data-del-meal]").forEach((b) => (b.onclick = async () => { await sb.from("meals").delete().eq("id", b.dataset.delMeal); route(); }));
   $$("[data-del-act]").forEach((b) => (b.onclick = async () => { await sb.from("activities").delete().eq("id", b.dataset.delAct); route(); }));
+}
+
+// ---------- LOG A BURN (bottom sheet) ----------
+const sv = (d) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const ACT = {
+  run:   { label: "Run",       by: "km",  met: null, icon: sv('<circle cx="14" cy="4.5" r="2"/><path d="M8 21l3-6 3 3v4M6 12l3-4 4 1 3 4 3 1M11 15l-1-4"/>') },
+  walk:  { label: "Walk",      by: "km",  met: null, icon: sv('<circle cx="12" cy="4.5" r="2"/><path d="M10 21l2-7 3 3v4M8 12l2-4h3l2 4M12 14v-6"/>') },
+  rope:  { label: "Jump rope", by: "min", met: 12,   icon: sv('<path d="M5 4v6M19 4v6M5 10c0 8 14 8 14 0"/><circle cx="12" cy="6" r="2"/>') },
+  cycle: { label: "Cycle",     by: "min", met: 7,    icon: sv('<circle cx="6" cy="17" r="3.5"/><circle cx="18" cy="17" r="3.5"/><path d="M6 17l4-8h5l3 8M10 9l2 8M14 5h2"/>') },
+  other: { label: "Workout",   by: "min", met: 6,    icon: sv('<path d="M3 10v4M6 8v8M18 8v8M21 10v4M6 12h12"/>') },
+};
+const PRESETS = { km: [2, 3, 5, 10], min: [15, 30, 45, 60] };
+
+function openBurnSheet(init = {}) {
+  const st = { kind: init.kind || localStorage.getItem("snb_last_kind") || "run", km: init.km || 0, min: 0, kcal: null, when: "" };
+  const w = weight();
+  const calc = () => {
+    if (st.kcal != null) return st.kcal;
+    const a = ACT[st.kind];
+    if (st.kind === "run") return Math.round(st.km * w);
+    if (st.kind === "walk") return Math.round(st.km * 0.5 * w);
+    return Math.round((st.min * a.met * w) / 60);
+  };
+  const wrap = document.createElement("div");
+  wrap.className = "sheet-backdrop";
+  document.body.appendChild(wrap);
+  const prevFocus = document.activeElement;
+  const close = () => { wrap.remove(); prevFocus?.focus?.(); };
+
+  const render = () => {
+    const a = ACT[st.kind];
+    const main = a.by === "km" ? "km" : "min";
+    const val = main === "km" ? st.km : st.min;
+    const k = calc();
+    const pace = st.kind === "run" && st.km > 0 && st.min > 0 ? (() => { const p = st.min / st.km; return `${Math.floor(p)}:${String(Math.round((p % 1) * 60)).padStart(2, "0")} /km`; })() : "";
+    wrap.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="burnTitle">
+      <div class="row"><h1 id="burnTitle" style="font-size:24px">Log a burn</h1>
+        <button class="icon-btn" id="closeSheet" aria-label="Close">${sv('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
+
+      <div class="act-grid" role="radiogroup" aria-label="Activity">
+        ${Object.entries(ACT).map(([key, x]) => `<button type="button" role="radio" aria-checked="${st.kind === key}" class="act-tile" data-kind="${key}">${x.icon}<span>${x.label}</span></button>`).join("")}
+      </div>
+
+      <div class="card stack">
+        <div class="row"><b>${main === "km" ? "Distance" : "Duration"}</b><span class="muted">${main === "km" ? "kilometres" : "minutes"}</span></div>
+        <div class="stepper">
+          <button type="button" class="step-btn" data-step="-1" aria-label="Less">${sv('<path d="M5 12h14"/>')}</button>
+          <input id="mainVal" type="number" inputmode="decimal" min="0" step="${main === "km" ? 0.1 : 1}" value="${val || ""}" placeholder="0" aria-label="${main === "km" ? "Distance in km" : "Minutes"}">
+          <button type="button" class="step-btn" data-step="1" aria-label="More">${sv('<path d="M12 5v14M5 12h14"/>')}</button>
+        </div>
+        <div class="chips" style="justify-content:space-between">${PRESETS[main].map((v) => `<button type="button" class="chip${v === val ? " on" : ""}" data-preset="${v}">${v} ${main}</button>`).join("")}</div>
+        ${main === "km" ? `<label>Time taken (optional, minutes)<input id="minVal" type="number" inputmode="numeric" min="0" value="${st.min || ""}" placeholder="e.g. 30"></label>` : ""}
+      </div>
+
+      <div class="burn-total" aria-live="polite">
+        <div><span class="muted">You burned about</span><div class="big-k">${k ? n0(k) : "–"} <small>kcal</small></div>
+          <span class="muted">${pace ? `Pace ${pace} · ` : ""}${k ? `≈ ${n1(k / 7.7)} g of fat` : "Pick a distance or time"}</span></div>
+        <button type="button" class="outline small" id="editK">${st.kcal != null ? "Auto" : "Edit"}</button>
+      </div>
+      ${st.kcal != null ? `<label>kcal from your watch<input id="kVal" type="number" inputmode="numeric" min="1" value="${st.kcal || ""}"></label>` : ""}
+
+      <label>When<input id="whenVal" type="time" value="${st.when || new Date().toTimeString().slice(0, 5)}"></label>
+      <button class="primary block" id="saveBurn" ${k ? "" : "disabled"}>Save ${k ? n0(k) + " kcal burn" : "burn"}</button>
+    </div>`;
+
+    wrap.querySelector("#closeSheet").onclick = close;
+    wrap.querySelectorAll("[data-kind]").forEach((b) => (b.onclick = () => { st.kind = b.dataset.kind; st.kcal = null; render(); }));
+    const mv = wrap.querySelector("#mainVal");
+    const setMain = (v) => { v = Math.max(0, Math.round(v * 10) / 10); if (main === "km") st.km = v; else st.min = Math.round(v); };
+    mv.oninput = () => { setMain(+mv.value || 0); refresh(); };
+    wrap.querySelectorAll("[data-step]").forEach((b) => (b.onclick = () => { setMain((main === "km" ? st.km : st.min) + (+b.dataset.step) * (main === "km" ? 0.5 : 5)); render(); }));
+    wrap.querySelectorAll("[data-preset]").forEach((b) => (b.onclick = () => { setMain(+b.dataset.preset); render(); }));
+    const mn = wrap.querySelector("#minVal"); if (mn) mn.oninput = () => { st.min = +mn.value || 0; refresh(); };
+    const kv = wrap.querySelector("#kVal"); if (kv) kv.oninput = () => { st.kcal = +kv.value || 0; refresh(); };
+    wrap.querySelector("#whenVal").onchange = (e) => { st.when = e.target.value; };
+    wrap.querySelector("#editK").onclick = () => { st.kcal = st.kcal != null ? null : calc(); render(); wrap.querySelector("#kVal")?.focus(); };
+    wrap.querySelector("#saveBurn").onclick = save;
+  };
+  // update the numbers without rebuilding the inputs (keeps the keyboard open)
+  const refresh = () => {
+    const k = calc();
+    const box = wrap.querySelector(".burn-total .big-k"); if (box) box.innerHTML = `${k ? n0(k) : "–"} <small>kcal</small>`;
+    const btn = wrap.querySelector("#saveBurn"); btn.disabled = !k; btn.textContent = `Save ${k ? n0(k) + " kcal burn" : "burn"}`;
+    const sub = wrap.querySelector(".burn-total .muted:last-child");
+    if (sub) sub.textContent = k ? `≈ ${n1(k / 7.7)} g of fat` : "Pick a distance or time";
+    wrap.querySelectorAll("[data-preset]").forEach((c) => c.classList.toggle("on", +c.dataset.preset === (ACT[st.kind].by === "km" ? st.km : st.min)));
+  };
+  const save = async () => {
+    const k = calc(); if (!k) return;
+    const btn = wrap.querySelector("#saveBurn"); btn.disabled = true; btn.textContent = "Saving…";
+    const when = new Date(); const t = wrap.querySelector("#whenVal").value;
+    if (t) { const [h, m] = t.split(":"); when.setHours(+h, +m, 0, 0); }
+    const { error } = await sb.from("activities").insert({ kind: st.kind, distance_km: ACT[st.kind].by === "km" ? st.km : 0, minutes: st.min || 0, kcal: k, started_at: when.toISOString() });
+    if (error) { btn.disabled = false; return fail(error); }
+    localStorage.setItem("snb_last_kind", st.kind);
+    close();
+    toast(profile.serious_mode ? "Saved" : `−${n0(k)} kcal. Flames everywhere.`);
+    location.hash = "#home"; route();
+  };
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  wrap.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  render();
+  wrap.querySelector("#mainVal").focus({ preventScroll: true });
 }
 
 // ---------- SNAP ----------
