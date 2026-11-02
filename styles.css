@@ -100,3 +100,5 @@ button:active, .btn:active, nav#tabs a:active, .chip:active { transform: scale(.
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+nav#tabs[hidden] { display: none; }

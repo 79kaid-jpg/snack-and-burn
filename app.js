@@ -112,21 +112,57 @@ async function redeemInvite() {
 }
 
 // ---------- login ----------
+let loginMode = "signin";
 function login() {
+  const signup = loginMode === "signup";
   app.innerHTML = `
-    <div style="height:8vh"></div>
+    <div style="height:6vh"></div>
+    <img class="app-logo" src="icon-192.png" alt="">
     <h1 style="font-size:40px">Snack <span style="color:var(--burn)">&amp;</span> Burn</h1>
     <p class="muted" style="font-size:16px">Eat it. Snap it. Burn it.</p>
+    <div class="seg" role="group" aria-label="Sign in or create account">
+      <button type="button" aria-pressed="${!signup}" data-mode="signin">Sign in</button>
+      <button type="button" aria-pressed="${signup}" data-mode="signup">Create account</button>
+    </div>
     <form id="f" class="card stack">
-      <label>Email<input type="email" name="email" required autocomplete="email" placeholder="you@example.com"></label>
-      <button class="primary block">Send me a sign-in link</button>
-      <p class="muted">No password. We email you a magic link.</p>
-    </form>`;
-  $("#f").onsubmit = async (e) => {
+      <label>Email<input type="email" name="email" required autocomplete="email" autocapitalize="off" placeholder="you@example.com"></label>
+      <label>Password<input type="password" name="password" required minlength="6" autocomplete="${signup ? "new-password" : "current-password"}" placeholder="At least 6 characters"></label>
+      <button class="primary block">${signup ? "Create account" : "Sign in"}</button>
+      ${signup ? "" : `<button type="button" class="outline block" id="forgot">Forgot password?</button>`}
+    </form>
+    <button type="button" class="outline block" id="magic">Email me a sign-in link instead</button>`;
+  $$("[data-mode]").forEach((b) => (b.onclick = () => { loginMode = b.dataset.mode; login(); }));
+  const f = $("#f");
+  f.onsubmit = async (e) => {
     e.preventDefault();
-    const email = new FormData(e.target).get("email");
+    const email = f.email.value.trim(), password = f.password.value;
+    const btn = f.querySelector(".primary"); btn.disabled = true;
+    const { data, error } = signup
+      ? await sb.auth.signUp({ email, password, options: { emailRedirectTo: location.origin + location.pathname } })
+      : await sb.auth.signInWithPassword({ email, password });
+    btn.disabled = false;
+    if (error) {
+      if (/invalid login/i.test(error.message)) return toast("Wrong email or password. New here? Tap Create account.");
+      if (/already registered/i.test(error.message)) return toast("This email already has an account. Sign in instead.");
+      return fail(error);
+    }
+    if (signup && !data.session) {
+      app.innerHTML = `<h1>Confirm your email</h1><div class="card"><p>We sent a confirmation link to <b>${esc(email)}</b>. Open it, then sign in.</p></div>`;
+    }
+  };
+  const forgot = $("#forgot");
+  if (forgot) forgot.onclick = async () => {
+    const email = f.email.value.trim();
+    if (!email) return toast("Type your email first");
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname + "#profile?setpw=1" });
+    if (error) return fail(/rate limit/i.test(error.message) ? new Error("Too many emails right now. Try again in an hour.") : error);
+    toast("Check your email for a reset link");
+  };
+  $("#magic").onclick = async () => {
+    const email = f.email.value.trim();
+    if (!email) return toast("Type your email first");
     const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (error) return fail(error);
+    if (error) return fail(/rate limit/i.test(error.message) ? new Error("Too many emails right now. Try again in an hour, or use a password.") : error);
     app.innerHTML = `<h1>Check your email</h1><div class="card"><p>We sent a sign-in link to <b>${esc(email)}</b>. Open it on this phone.</p></div>`;
   };
 }
@@ -587,10 +623,24 @@ async function profileView() {
       <p class="muted">Web apps can’t read Apple Health directly. Automatic sync arrives with the native iOS app. For now, log runs from Home in a few taps.</p>
     </div>
     ${profile.is_admin ? `<a class="btn primary block" href="#admin">Open Admin</a>` : ""}
+    <h2>Password</h2>
+    <form id="pw" class="card stack">
+      <label>New password<input type="password" name="pw" minlength="6" required autocomplete="new-password" placeholder="At least 6 characters"></label>
+      <button class="outline block">Set password</button>
+      <p class="muted">Then sign in with email + password, no email link needed.</p>
+    </form>
     <button class="outline block" id="out">Sign out</button>
     <button class="outline block" id="howInstall">How to add to Home Screen</button>
     <p class="version">Snack &amp; Burn · version ${esc(APP_VERSION)}</p>`;
   $("#howInstall").onclick = () => showInstallGuide(true);
+  const pw = $("#pw");
+  pw.onsubmit = async (e) => {
+    e.preventDefault();
+    const { error } = await sb.auth.updateUser({ password: pw.pw.value });
+    if (error) return fail(error);
+    pw.reset(); toast("Password saved");
+  };
+  if (location.hash.includes("setpw=1")) { pw.scrollIntoView(); pw.pw.focus(); toast("Choose a new password"); }
   wireStats(() => { toast("Saved. New budget: " + n0(profile.budget_kcal) + " kcal"); route(); });
   $("#serious").onclick = async () => {
     const v = !profile.serious_mode;
