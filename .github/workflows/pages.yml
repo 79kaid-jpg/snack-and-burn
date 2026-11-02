@@ -24,6 +24,12 @@ jobs:
           cat > config.js <<CFG
           window.SNB_CONFIG = { SUPABASE_URL: "${{ vars.SUPABASE_URL }}", SUPABASE_ANON_KEY: "${{ vars.SUPABASE_ANON_KEY }}" };
           CFG
+      - name: Stamp version (used by the in-app auto update)
+        run: |
+          V="$(date -u +%Y.%m.%d)-$(git rev-parse --short HEAD)"
+          echo "{\"version\":\"$V\",\"built\":\"$(date -u +%FT%TZ)\"}" > version.json
+          sed -i "s/__APP_VERSION__/$V/" sw.js
+          cat version.json
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

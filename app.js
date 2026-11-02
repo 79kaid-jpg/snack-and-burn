@@ -93,7 +93,7 @@ async function route() {
   const key = name === "profile" ? "profileView" : name;
   const view = VIEWS[key] || home;
   tabs.querySelectorAll("a").forEach((a) => a.classList.toggle("active", a.dataset.tab === name));
-  app.innerHTML = `<p class="muted">Loading…</p>`;
+  app.innerHTML = `<div class="skel" style="height:36px;width:60%"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:64px"></div><div class="skel" style="height:64px"></div>`;
   try { await view(new URLSearchParams(query || "")); } catch (e) { fail(e); }
   window.scrollTo(0, 0);
 }
@@ -197,13 +197,21 @@ async function home(q) {
     <span class="badge">${streak}-day streak</span>
   </div>
   <section class="hero" aria-label="Today's balance">
-    <div class="row"><span class="muted">${left >= 0 ? "Left today" : "Over budget"}</span><span class="muted">Budget ${n0(budget)} kcal</span></div>
-    <div class="big">${n0(Math.abs(left))} <small>kcal</small></div>
-    <div class="bar" role="img" aria-label="Snacked ${n0(eaten)}, burned ${n0(burned)}"><span style="width:${(eaten / total) * 100}%"></span><span style="width:${(burned / total) * 100}%"></span></div>
-    <div class="grid g3">
-      <div><div class="muted" style="color:var(--snack)">Snacked</div><b>${n0(eaten)}</b></div>
-      <div><div class="muted" style="color:#FF8A73">Burned</div><b>${n0(burned)}</b></div>
-      <div><div class="muted" style="color:#7BDC9C">Net</div><b>${n0(eaten - burned)}</b></div>
+    <div class="ring-wrap">
+      <div class="ring-center">
+        <svg class="ring" viewBox="0 0 132 132" role="img" aria-label="Snacked ${n0(eaten)} of ${n0(budget + burned)} kcal, burned ${n0(burned)} of ${BURN_GOAL} kcal goal">
+          <circle cx="66" cy="66" r="58" stroke="#3A332D"/>
+          <circle cx="66" cy="66" r="58" stroke="var(--snack)" stroke-dasharray="${2 * Math.PI * 58}" stroke-dashoffset="${2 * Math.PI * 58 * (1 - Math.min(1, eaten / Math.max(1, budget + burned)))}"/>
+          <circle cx="66" cy="66" r="42" stroke="#3A332D"/>
+          <circle cx="66" cy="66" r="42" stroke="#FF6A4D" stroke-dasharray="${2 * Math.PI * 42}" stroke-dashoffset="${2 * Math.PI * 42 * (1 - Math.min(1, burned / BURN_GOAL))}"/>
+        </svg>
+        <div class="label"><b>${n0(Math.abs(left))}</b><span class="muted">${left >= 0 ? "kcal left" : "kcal over"}</span></div>
+      </div>
+      <div class="legend">
+        <div><span class="dot" style="background:var(--snack)"></span><div><div class="muted">Snacked</div><b>${n0(eaten)}</b></div></div>
+        <div><span class="dot" style="background:#FF6A4D"></span><div><div class="muted">Burned</div><b>${n0(burned)}</b> <span class="muted">/ ${BURN_GOAL}</span></div></div>
+        <div><span class="dot" style="background:#E8D9C2"></span><div><div class="muted">Budget</div><b>${n0(budget)}</b></div></div>
+      </div>
     </div>
   </section>
   ${left < 0 ? `<div class="card"><p><b class="danger">≈ ${n0(-left / 7.7)} g fat</b> if you don’t burn the extra ${n0(-left)} kcal.</p><p class="muted">Run ${n1(burnFor(-left).runKm)} km or walk ${n1(burnFor(-left).walkKm)} km to balance today.</p></div>` : ""}
@@ -211,7 +219,7 @@ async function home(q) {
   <div class="row"><h2>Snacks today</h2><a class="btn outline small" href="#snap">+ Add</a></div>
   ${meals.data.length ? `<div class="list">${meals.data.map((m) => `
     <div class="row"><div><div>${esc(m.name)}</div><div class="muted">${time(m.eaten_at)}</div></div>
-    <div class="row"><b>${n0(m.kcal)}</b><button class="outline small" data-del-meal="${m.id}" aria-label="Remove ${esc(m.name)}">✕</button></div></div>`).join("")}</div>`
+    <div class="row"><b>${n0(m.kcal)}</b><button class="icon-btn" data-del-meal="${m.id}" aria-label="Remove ${esc(m.name)}"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
     : `<p class="muted">Nothing yet. Tap Snap to photograph your meal.</p>`}
 
   <div class="row"><h2>Burns today</h2><button class="outline small" id="showLog">+ Log a burn</button></div>
@@ -226,7 +234,7 @@ async function home(q) {
   </form>
   ${acts.data.length ? `<div class="list" style="background:var(--tint-burn)">${acts.data.map((a) => `
     <div class="row"><div><div>${esc({ run: "Run", walk: "Walk", rope: "Jump rope", cycle: "Ride", other: "Workout" }[a.kind])}${a.distance_km ? ` · ${n1(a.distance_km)} km` : ""}${a.minutes ? ` · ${a.minutes} min` : ""}</div><div class="muted">${time(a.started_at)} · ${esc(a.source)}</div></div>
-    <div class="row"><b class="danger">−${n0(a.kcal)}</b><button class="outline small" data-del-act="${a.id}" aria-label="Remove activity">✕</button></div></div>`).join("")}</div>`
+    <div class="row"><b class="danger">−${n0(a.kcal)}</b><button class="icon-btn" data-del-act="${a.id}" aria-label="Remove activity"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
     : `<p class="muted">No burns yet today.</p>`}
   ${quip(["Every snack has a price. It’s paid in kilometres.", "Your shoes miss you.", "Balance is a verb. Go do it."])}`;
 
@@ -253,11 +261,15 @@ async function home(q) {
 
 // ---------- SNAP ----------
 const MULT = { S: 0.7, M: 1, L: 1.3 };
+const BURN_GOAL = 400; // daily burn ring target (kcal)
 async function snap() {
   if (!snapState) snapState = { step: "camera", photo: null, items: [] };
   const s = snapState;
 
   if (s.step === "camera") {
+    const { data: hist } = await sb.from("meals").select("name,kcal,items").order("eaten_at", { ascending: false }).limit(30);
+    const seen = new Set();
+    const recent = (hist || []).filter((m) => !seen.has(m.name) && seen.add(m.name)).slice(0, 6);
     app.innerHTML = `
       <div class="row"><h1>Snap your meal</h1><span class="muted">Step 1 of 3</span></div>
       <label class="drop" for="cam">
@@ -266,7 +278,14 @@ async function snap() {
       </label>
       <input id="cam" type="file" accept="image/*" capture="environment" hidden>
       <div class="row" style="justify-content:center"><label for="cam" class="shutter" aria-label="Take photo" role="button" tabindex="0"></label></div>
-      <button class="outline block" id="manual">Skip photo, add dishes by hand</button>`;
+      <button class="outline block" id="manual">Skip photo, add dishes by hand</button>
+      ${recent.length ? `<h2>Eat it again</h2><div class="chips">${recent.map((m, i) => `<button class="chip" data-recent="${i}">${esc(m.name)} · ${n0(m.kcal)}</button>`).join("")}</div>` : ""}`;
+    $$("[data-recent]").forEach((b) => (b.onclick = () => {
+      const m = recent[+b.dataset.recent];
+      s.step = "detect"; s.photo = null;
+      s.items = (m.items && m.items.length ? m.items : [{ name: m.name, kcal: m.kcal }]).map((i) => ({ name: i.name, kcal: Math.round(i.kcal / (MULT[i.size] || 1)), size: i.size || "M" }));
+      route();
+    }));
     $("#cam").onchange = async (e) => {
       const file = e.target.files[0]; if (!file) return;
       s.photo = await downscale(file);
@@ -285,7 +304,7 @@ async function snap() {
       ${s.items.length ? `<p class="muted">Adjust the portions. Photos can’t see oil and sugar.</p>` : ""}
       ${s.items.map((it, idx) => `
         <div class="card stack">
-          <div class="row"><b>${esc(it.name)}</b><div class="row"><span class="display" style="font-size:20px">${n0(it.kcal * MULT[it.size])} kcal</span><button class="outline small" data-rm="${idx}" aria-label="Remove ${esc(it.name)}">✕</button></div></div>
+          <div class="row"><b>${esc(it.name)}</b><div class="row"><span class="display" style="font-size:20px">${n0(it.kcal * MULT[it.size])} kcal</span><button class="icon-btn" data-rm="${idx}" aria-label="Remove ${esc(it.name)}"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>
           <div class="pills">${["S", "M", "L"].map((z) => `<button type="button" data-i="${idx}" data-z="${z}" aria-pressed="${it.size === z}">${{ S: "Small", M: "Medium", L: "Large" }[z]}</button>`).join("")}</div>
         </div>`).join("")}
       <form id="add" class="card stack">
@@ -568,7 +587,10 @@ async function profileView() {
       <p class="muted">Web apps can’t read Apple Health directly. Automatic sync arrives with the native iOS app. For now, log runs from Home in a few taps.</p>
     </div>
     ${profile.is_admin ? `<a class="btn primary block" href="#admin">Open Admin</a>` : ""}
-    <button class="outline block" id="out">Sign out</button>`;
+    <button class="outline block" id="out">Sign out</button>
+    <button class="outline block" id="howInstall">How to add to Home Screen</button>
+    <p class="version">Snack &amp; Burn · version ${esc(APP_VERSION)}</p>`;
+  $("#howInstall").onclick = () => showInstallGuide(true);
   wireStats(() => { toast("Saved. New budget: " + n0(profile.budget_kcal) + " kcal"); route(); });
   $("#serious").onclick = async () => {
     const v = !profile.serious_mode;
@@ -765,5 +787,86 @@ async function admin() {
 }
 
 // ---------- PWA ----------
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
-route();
+let APP_VERSION = "dev";
+let swReg = null;
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").then((r) => (swReg = r)).catch(() => {});
+
+// ---------- AUTO UPDATE ----------
+// Each deploy writes version.json. The app checks it on open, on return to the app, and every 30 min.
+async function fetchVersion() {
+  try { const r = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" }); return r.ok ? (await r.json()).version : null; } catch { return null; }
+}
+async function checkForUpdate() {
+  const latest = await fetchVersion();
+  if (!latest || APP_VERSION === "dev" || latest === APP_VERSION) return;
+  const busy = location.hash.startsWith("#snap") && snapState && snapState.step !== "camera";
+  if (!busy && document.visibilityState === "visible" && !sessionStorage.getItem("snb_updated_" + latest)) {
+    sessionStorage.setItem("snb_updated_" + latest, "1");
+    return applyUpdate();
+  }
+  const bar = document.getElementById("update");
+  bar.innerHTML = `<span>New version ready</span><button id="doUpdate">Update</button>`;
+  bar.hidden = false;
+  document.getElementById("doUpdate").onclick = applyUpdate;
+}
+async function applyUpdate() {
+  try { await swReg?.update(); const keys = await caches.keys(); await Promise.all(keys.map((k) => caches.delete(k))); } catch { /* ignore */ }
+  location.reload();
+}
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
+setInterval(checkForUpdate, 30 * 60 * 1000);
+
+// ---------- ADD TO HOME SCREEN ----------
+const isStandalone = () => window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isIOSSafari = () => isIOS() && !/crios|fxios|edgios|opios/i.test(navigator.userAgent);
+let deferredPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredPrompt = e; });
+
+const SHARE_IC = '<svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4M6 11H5a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-8a1 1 0 0 0-1-1h-1"/></svg>';
+const PLUS_IC = '<svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/></svg>';
+
+function showInstallGuide(force) {
+  if (isStandalone()) { if (force) toast("Already on your Home Screen"); return; }
+  if (!force && localStorage.getItem("snb_install_dismissed")) return;
+  let steps;
+  if (isIOS() && !isIOSSafari()) {
+    steps = `<div class="step"><span class="num">1</span><div>Copy this page’s link and open it in <b>Safari</b>. iPhone only installs apps from Safari.</div></div>
+      <button class="primary block" id="copyLink">Copy link</button>`;
+  } else if (isIOS()) {
+    steps = `<div class="step"><span class="num">1</span><div>Tap <span class="kbd">${SHARE_IC} Share</span> at the bottom of Safari</div></div>
+      <div class="step"><span class="num">2</span><div>Scroll and tap <span class="kbd">${PLUS_IC} Add to Home Screen</span></div></div>
+      <div class="step"><span class="num">3</span><div>Tap <b>Add</b>. Snack &amp; Burn opens full-screen like a real app.</div></div>`;
+  } else if (deferredPrompt) {
+    steps = `<button class="primary block" id="nativeInstall">Install Snack &amp; Burn</button>`;
+  } else {
+    steps = `<div class="step"><span class="num">1</span><div>Open your browser menu <span class="kbd">⋮</span></div></div>
+      <div class="step"><span class="num">2</span><div>Tap <b>Add to Home screen</b> or <b>Install app</b></div></div>`;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "sheet-backdrop";
+  wrap.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-labelledby="installTitle">
+    <div class="row" style="justify-content:flex-start;gap:14px">
+      <img class="app-logo" src="icon-192.png" alt="">
+      <div><h1 id="installTitle" style="font-size:22px">Add Snack &amp; Burn to your Home Screen</h1>
+      <p class="muted">One tap to snap, full-screen, always up to date.</p></div>
+    </div>
+    ${steps}
+    <button class="outline block" id="laterInstall">Maybe later</button>
+  </div>`;
+  document.body.appendChild(wrap);
+  const close = () => { localStorage.setItem("snb_install_dismissed", "1"); wrap.remove(); };
+  wrap.querySelector("#laterInstall").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  wrap.querySelector("#laterInstall").focus();
+  const copy = wrap.querySelector("#copyLink");
+  if (copy) copy.onclick = async () => { await navigator.clipboard.writeText(location.origin + location.pathname); toast("Link copied. Paste it in Safari."); };
+  const nat = wrap.querySelector("#nativeInstall");
+  if (nat) nat.onclick = async () => { deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; wrap.remove(); };
+}
+
+(async () => {
+  APP_VERSION = (await fetchVersion()) || "dev";
+  await route();
+  setTimeout(() => { if (user) showInstallGuide(false); }, 1500);
+})();
