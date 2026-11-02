@@ -47,6 +47,7 @@ async function askClaude(model: string, image: string, mediaType: string): Promi
         { type: "text", text: PROMPT },
       ] }],
     }),
+    signal: AbortSignal.timeout(45000),
   });
   if (!r.ok) throw new Error(`Claude: ${r.status} ${(await r.text()).slice(0, 300)}`);
   const data = await r.json();
@@ -59,11 +60,13 @@ async function askGemini(model: string, image: string, mediaType: string): Promi
     headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "content-type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: [{ inline_data: { mime_type: mediaType, data: image } }, { text: PROMPT }] }],
-      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 800 },
+      generationConfig: { responseMimeType: "application/json", maxOutputTokens: 4096 },
     }),
+    signal: AbortSignal.timeout(45000),
   });
   if (!r.ok) throw new Error(`Gemini: ${r.status} ${(await r.text()).slice(0, 300)}`);
   const data = await r.json();
+  console.log("gemini finish:", data.candidates?.[0]?.finishReason, "usage:", JSON.stringify(data.usageMetadata ?? {}));
   return data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "{}";
 }
 
@@ -92,10 +95,13 @@ Deno.serve(async (req) => {
     if (provider === "gemini" && !hasGemini && hasClaude) provider = "claude";
     if (!(provider === "claude" ? hasClaude : hasGemini)) return json({ error: "AI is not configured yet" }, 503);
 
+    console.log("photo", Math.round(image.length / 1024), "KB base64 → provider", provider);
+    const t0 = Date.now();
     const text = provider === "claude"
       ? await askClaude(settings.claudeModel, image, mediaType)
       : await askGemini(settings.geminiModel, image, mediaType);
 
+    console.log("ai reply in", Date.now() - t0, "ms:", text.slice(0, 300));
     const match = text.match(/\{[\s\S]*\}/);
     const parsed = match ? JSON.parse(match[0]) : { items: [] };
     const items = (parsed.items ?? [])
@@ -108,6 +114,7 @@ Deno.serve(async (req) => {
       }));
     return json({ items, provider });
   } catch (e) {
+    console.error("analyze-meal failed:", String(e));
     return json({ error: String(e) }, 500);
   }
 });

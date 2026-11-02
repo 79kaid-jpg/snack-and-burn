@@ -366,7 +366,10 @@ async function analyze() {
     s.items = (data.items || []).map((i) => ({ name: i.name, kcal: i.kcal, size: "M" })); s.provider = data.provider;
     if (!s.items.length) toast("No food spotted. Add dishes by hand.");
   } catch (e) {
-    console.error(e); toast("AI couldn’t read the photo. Add dishes by hand.");
+    console.error(e);
+    let msg = e.message || "";
+    try { if (e.context?.json) msg = (await e.context.json()).error || msg; } catch { /* keep message */ }
+    toast(`AI couldn’t read the photo (${msg.slice(0, 80)}). Add dishes by hand.`);
   } finally { s.analyzing = false; if (snapState === s && s.step === "detect") route(); }
 }
 
