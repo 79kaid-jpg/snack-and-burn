@@ -906,7 +906,7 @@ async function analyze(text) {
     console.error(e);
     let msg = e.message || "";
     try { if (e.context?.json) msg = (await e.context.json()).error || msg; } catch { /* keep message */ }
-    toast(`AI couldn’t read that (${msg.slice(0, 80)}). Add dishes by hand.`);
+    toast(/402|429|quota|credit/i.test(msg) ? "AI is taking a break (out of credit). Pick from the menu or add dishes by hand." : `AI couldn’t read that (${msg.slice(0, 80)}). Add dishes by hand.`);
   } finally { s.analyzing = false; if (snapState === s && s.step === "detect") route(); }
 }
 

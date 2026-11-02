@@ -62,10 +62,20 @@ async function askClaude(model: string, image: string | null, mediaType: string,
   return data.content?.find((c: { type: string }) => c.type === "text")?.text ?? "{}";
 }
 
+// Paid key first; if it is out of credit (402) or rate-limited (429), use the free backup key.
+const KEYS = () => [Deno.env.get("GEMINI_API_KEY"), Deno.env.get("GEMINI_API_KEY_FREE")].filter(Boolean) as string[];
 async function askGeminiOnce(model: string, image: string | null, mediaType: string, text: string | undefined, ms: number): Promise<string> {
+  let last: unknown;
+  for (const key of KEYS()) {
+    try { return await askGeminiKey(key, model, image, mediaType, text, ms); }
+    catch (e) { last = e; if (!/Gemini: (402|429)/.test(String(e))) throw e; console.warn("key unavailable, trying backup:", String(e).slice(0, 80)); }
+  }
+  throw last;
+}
+async function askGeminiKey(key: string, model: string, image: string | null, mediaType: string, text: string | undefined, ms: number): Promise<string> {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
-    headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "content-type": "application/json" },
+    headers: { "x-goog-api-key": key, "content-type": "application/json" },
     body: JSON.stringify({
       contents: [{ parts: image ? [{ inline_data: { mime_type: mediaType, data: image } }, { text: PROMPT }] : [{ text: TEXT_PROMPT(text ?? "") }] }],
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: 4096 },
@@ -96,7 +106,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const settings = await loadSettings();
     const hasClaude = !!Deno.env.get("ANTHROPIC_API_KEY");
-    const hasGemini = !!Deno.env.get("GEMINI_API_KEY");
+    const hasGemini = KEYS().length > 0;
 
     // Admin page asks which keys are configured
     if (body.action === "status") {

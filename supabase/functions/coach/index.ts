@@ -24,9 +24,18 @@ async function settings() {
 }
 
 async function gemini(model: string, prompt: string, ms: number) {
+  const keys = [Deno.env.get("GEMINI_API_KEY"), Deno.env.get("GEMINI_API_KEY_FREE")].filter(Boolean) as string[];
+  let last: unknown;
+  for (const key of keys) {
+    try { return await geminiKey(key, model, prompt, ms); }
+    catch (e) { last = e; if (!/Gemini (402|429)/.test(String(e))) throw e; }
+  }
+  throw last;
+}
+async function geminiKey(key: string, model: string, prompt: string, ms: number) {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
-    headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "content-type": "application/json" },
+    headers: { "x-goog-api-key": key, "content-type": "application/json" },
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { maxOutputTokens: 2048 } }),
     signal: AbortSignal.timeout(ms),
   });
@@ -47,7 +56,7 @@ async function claude(model: string, prompt: string) {
 }
 async function ask(prompt: string) {
   const s = await settings();
-  const hasC = !!Deno.env.get("ANTHROPIC_API_KEY"), hasG = !!Deno.env.get("GEMINI_API_KEY");
+  const hasC = !!Deno.env.get("ANTHROPIC_API_KEY"), hasG = !!(Deno.env.get("GEMINI_API_KEY") || Deno.env.get("GEMINI_API_KEY_FREE"));
   let p = s.provider;
   if (p === "claude" && !hasC && hasG) p = "gemini";
   if (p === "gemini" && !hasG && hasC) p = "claude";
