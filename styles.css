@@ -196,3 +196,15 @@ main { gap: 12px; }
 .badge-name { text-align: center; line-height: 1.2; }
 .pop { animation: pop .5s cubic-bezier(.2,1.6,.4,1); }
 @keyframes pop { from { transform: scale(.3) rotate(-20deg); opacity: 0; } }
+
+.body-burn { display: flex; flex-direction: column; gap: 6px; width: 100%; background: #2A2420; border-radius: 14px; padding: 10px 12px; min-height: 44px; color: var(--cream); font-size: 13px; font-weight: 400; text-align: left; align-items: stretch; }
+.body-burn b { color: var(--snack); font-weight: 600; }
+.bb-bar { height: 6px; border-radius: 999px; background: #3A332D; overflow: hidden; }
+.bb-bar span { display: block; height: 100%; background: #E8D9C2; border-radius: 999px; }
+.bb-row { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.bb-i { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid #E8D9C2; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex: none; }
+.burn-split { display: grid; gap: 10px; }
+.burn-split > div { background: #fff; border-radius: var(--r); padding: 12px 14px; }
+.burn-split b { font-family: Fredoka, sans-serif; font-size: 26px; font-weight: 500; margin-right: 8px; }
+.burn-split span { font-weight: 600; }
+.burn-split p { margin: 4px 0 0; }

@@ -30,6 +30,8 @@ function toast(msg) {
 }
 function startOfToday() { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString(); }
 function weight() { return Number(profile?.weight_kg) || 65; }
+// Resting burn: what the body burns doing nothing (Mifflin-St Jeor)
+function bmr(p) { return Math.round(10 * p.weight_kg + 6.25 * p.height_cm - 5 * p.age + (p.sex === "female" ? -161 : 5)); }
 function tdee(p) {
   const base = 10 * p.weight_kg + 6.25 * p.height_cm - 5 * p.age + (p.sex === "female" ? -161 : 5);
   return Math.round((base * p.activity) / 10) * 10;
@@ -245,7 +247,12 @@ async function home(q) {
   if (acts.error) throw acts.error;
   const eaten = meals.data.reduce((s, m) => s + m.kcal, 0);
   const burned = acts.data.reduce((s, a) => s + a.kcal, 0);
-  const budget = profile.budget_kcal;
+  // If real steps are logged today, use the "mostly sitting" base so walking isn't counted twice
+  const hasSteps = acts.data.some((a) => a.steps > 0);
+  const restDay = bmr(profile);
+  const budget = hasSteps ? Math.round((restDay * 1.2) / 10) * 10 : profile.budget_kcal;
+  const nowH = new Date().getHours() + new Date().getMinutes() / 60;
+  const restSoFar = Math.round(restDay * (nowH / 24));
   const left = budget + burned - eaten;
   const total = Math.max(budget + burned, eaten, 1);
   const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -272,6 +279,10 @@ async function home(q) {
         <div><span class="dot" style="background:#E8D9C2"></span><div><div class="muted">Budget</div><b>${n0(budget)}</b></div></div>
       </div>
     </div>
+    <button class="body-burn" id="bodyBurn" aria-label="How your body burns calories">
+      <span class="bb-bar" aria-hidden="true"><span style="width:${(nowH / 24) * 100}%"></span></span>
+      <span class="bb-row"><span>Body burned so far <b>~${n0(restSoFar)}</b> of ${n0(restDay)} kcal at rest</span><span class="bb-i" aria-hidden="true">i</span></span>
+    </button>
   </section>
   ${left < 0 ? `<div class="card"><p><b class="danger">≈ ${n0(-left / 7.7)} g fat</b> if you don’t burn the extra ${n0(-left)} kcal.</p><p class="muted">Run ${n1(burnFor(-left).runKm)} km or walk ${n1(burnFor(-left).walkKm)} km to balance today.</p></div>` : ""}
 
@@ -318,6 +329,13 @@ async function home(q) {
 
   $("#showLog").onclick = () => openBurnSheet();
   $("#quickBurn").onclick = () => openBurnSheet();
+  $("#bodyBurn").onclick = () => openSheet("How your body burns calories", `
+    <div class="burn-split">
+      <div><b>${n0(restDay)}</b><span>Resting (BMR)</span><p class="muted">Breathing, heartbeat, staying warm. Burned even if you stay in bed all day.</p></div>
+      <div><b>${n0(budget - restDay)}</b><span>Daily life</span><p class="muted">${hasSteps ? "Light everyday moving. Your synced steps are added on top, so they’re not counted twice." : "Everyday moving, from the activity level in your Profile."}</p></div>
+      <div><b>${n0(burned)}</b><span>Workouts & steps</span><p class="muted">What you logged today. Added to your budget.</p></div>
+    </div>
+    <p class="muted">Today you can eat about <b>${n0(budget + burned)}</b> kcal and stay level. Right now your body has used ~${n0(restSoFar)} kcal at rest.</p>`);
   $("#logWeight").onclick = () => openWeightSheet(wts);
   const ss = $("#syncSteps");
   if (ss) ss.onclick = () => runStepShortcut();
@@ -409,6 +427,10 @@ const BADGE_IC = {
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   crown: '<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5z"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
+  bowl: '<path d="M3 11h18a9 9 0 0 1-18 0zM8 7c0-1.5 1-2 1-3M12 7c0-1.5 1-2 1-3M16 7c0-1.5 1-2 1-3"/>',
+  target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
+  question: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .8-1 1.5v.7M12 17h.01"/>',
 };
 const badgeSvg = (b, size = 30) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${BADGE_IC[b.icon] || BADGE_IC.star}</svg>`;
 const badgeTile = (b, i) => `<button class="badge-tile${b.earned_at ? "" : " locked"}" data-badge="${i}" aria-label="${esc(b.name)}${b.earned_at ? "" : " (locked)"}">
@@ -429,8 +451,8 @@ async function badgesView() {
   const list = await rpc("my_badge_list");
   const got = list.filter((b) => b.earned_at).length;
   app.innerHTML = `
-    <div class="row"><h1>Badges</h1><span class="badge">${got} / ${list.filter((b) => b.kind === "auto").length}</span></div>
-    <p class="muted">Earn them by logging, moving and racing friends. Some are special gifts from the team.</p>
+    <div class="row"><h1>Badges</h1><span class="badge">${got} / ${list.filter((b) => b.kind !== "gift").length}</span></div>
+    <p class="muted">Earn them by logging, moving and racing friends. The ??? ones are secret: you’ll find out when you earn them.</p>
     <div class="badge-grid">${list.map(badgeTile).join("")}</div>`;
   wireBadgeTiles(list);
 }
@@ -439,7 +461,7 @@ let badgeCheckBusy = false;
 async function checkBadges() {
   if (badgeCheckBusy) return; badgeCheckBusy = true;
   try {
-    await rpc("award_badges");
+    await rpc("check_all_badges");
     const unseen = await rpc("unseen_badges");
     for (const b of unseen) {
       await new Promise((res) => {
