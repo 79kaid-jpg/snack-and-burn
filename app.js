@@ -316,9 +316,11 @@ async function home(q) {
 // ---------- STEP SYNC: run the user's Apple Shortcut, then come back ----------
 const stepShortcutName = () => { try { return localStorage.getItem("snb_shortcut") || "Lấy số bước chân"; } catch { return "Lấy số bước chân"; } };
 function runStepShortcut() {
-  const back = location.origin + location.pathname + "#home";
   sessionStorage.setItem("snb_syncing", String(Date.now()));
-  location.href = `shortcuts://x-callback-url/run-shortcut?name=${encodeURIComponent(stepShortcutName())}&x-success=${encodeURIComponent(back)}&x-error=${encodeURIComponent(back)}`;
+  // No return link: iPhone would reopen it in Safari instead of the installed app.
+  // The user comes back with the "◀ Snack & Burn" button at the top-left; Home then refreshes itself.
+  location.href = `shortcuts://run-shortcut?name=${encodeURIComponent(stepShortcutName())}`;
+  if (!sessionStorage.getItem("snb_sync_tip")) { sessionStorage.setItem("snb_sync_tip", "1"); toast("After it runs, tap ◀ Snack & Burn at the top-left to come back"); }
 }
 // when the user comes back from Shortcuts, refresh Home to show the new steps
 document.addEventListener("visibilitychange", () => {
