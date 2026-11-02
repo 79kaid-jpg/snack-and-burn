@@ -62,8 +62,8 @@ const DISHES = [
 let dishCache = null;
 async function loadDishes(force) {
   if (dishCache && !force) return dishCache;
-  const { data, error } = await sb.from("dishes").select("name,kcal").eq("active", true).order("name");
-  dishCache = !error && data.length ? data.map((d) => [d.name, d.kcal]) : DISHES;
+  const { data, error } = await sb.from("dishes").select("name,kcal,image_url").eq("active", true).order("name");
+  dishCache = !error && data.length ? data.map((d) => [d.name, d.kcal, d.image_url]) : DISHES;
   return dishCache;
 }
 
@@ -219,6 +219,7 @@ async function home(q) {
   const since = startOfToday();
   const wk0 = new Date(); wk0.setHours(0, 0, 0, 0); wk0.setDate(wk0.getDate() - 6);
   const d60 = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
+  await loadDishes();
   const wRes = await sb.from("weights").select("day,kg").gte("day", d60).order("day");
   const wts = wRes.data || [];
   const [meals, acts, streak, wkMeals, wkActs, chs] = await Promise.all([
@@ -298,9 +299,9 @@ async function home(q) {
   </a>
 
   <div class="row"><h2>Snacks today</h2><a class="btn outline small" href="#snap">+ Add</a></div>
-  ${meals.data.length ? `<div class="list">${meals.data.map((m) => `
-    <div class="row"><div><div>${esc(m.name)}</div><div class="muted">${time(m.eaten_at)}</div></div>
-    <div class="row"><b>${n0(m.kcal)}</b><button class="icon-btn" data-del-meal="${m.id}" aria-label="Remove ${esc(m.name)}"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`).join("")}</div>`
+  ${meals.data.length ? `<div class="list">${meals.data.map((m) => { const pic = (dishCache || []).find((d) => d[2] && m.name.toLowerCase().startsWith(d[0].toLowerCase().replace(/\s*\(.*$/, "")))?.[2]; return `
+    <div class="row"><div class="row" style="justify-content:flex-start;gap:12px">${pic ? `<img class="meal-thumb" src="${esc(pic)}" alt="">` : `<span class="meal-thumb ph">${sv(FORK)}</span>`}<div><div>${esc(m.name)}</div><div class="muted">${time(m.eaten_at)}</div></div></div>
+    <div class="row"><b>${n0(m.kcal)}</b><button class="icon-btn" data-del-meal="${m.id}" aria-label="Remove ${esc(m.name)}"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>`; }).join("")}</div>`
     : `<a class="empty" href="#snap"><span>No meals yet today</span><b>Snap one →</b></a>`}
 
   <div class="row"><h2>Burns today</h2><div class="row" style="gap:8px">${isIOS() ? `<button class="outline small" id="syncSteps" aria-label="Sync steps from Apple Health">${ACT.steps.icon}<span>Sync</span></button>` : ""}<button class="primary small" id="showLog">+ Log a burn</button></div></div>
@@ -807,6 +808,7 @@ async function snap() {
   }
 
   if (s.step === "detect") {
+    const dl0 = await loadDishes();
     const total = s.items.reduce((t, i) => t + Math.round(i.kcal * MULT[i.size]), 0);
     app.innerHTML = `
       <div class="row"><h1>${s.analyzing ? "Looking at your meal…" : s.items.length ? `We spotted ${s.items.length}` : "What did you eat?"}</h1><span class="muted">Step 2 of 3</span></div>
@@ -818,6 +820,10 @@ async function snap() {
           <div class="row"><b>${esc(it.name)}</b><div class="row"><span class="display" style="font-size:20px">${n0(it.kcal * MULT[it.size])} kcal</span><button class="icon-btn" data-rm="${idx}" aria-label="Remove ${esc(it.name)}"><svg class="ic ic-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg></button></div></div>
           <div class="pills">${["S", "M", "L"].map((z) => `<button type="button" data-i="${idx}" data-z="${z}" aria-pressed="${it.size === z}">${{ S: "Small", M: "Medium", L: "Large" }[z]}</button>`).join("")}</div>
         </div>`).join("")}
+      <div class="row"><h2>Pick from the menu</h2><span class="muted">tap to add</span></div>
+      <div class="menu-strip">${dl0.map(([n, k, img], i) => `<button class="menu-item" data-menu="${i}">
+        ${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="menu-ph">${sv(FORK)}</span>`}
+        <b>${esc(n)}</b><span>${n0(k)} kcal</span></button>`).join("")}</div>
       <form id="add" class="card stack">
         <label>Add a dish<input name="name" list="dishes" placeholder="e.g. Phở bò" autocomplete="off"></label>
         <datalist id="dishes">${(await loadDishes()).map(([d]) => `<option value="${esc(d)}">`).join("")}</datalist>
@@ -830,7 +836,8 @@ async function snap() {
     $$("[data-z]").forEach((b) => (b.onclick = () => { s.items[b.dataset.i].size = b.dataset.z; route(); }));
     $$("[data-rm]").forEach((b) => (b.onclick = () => { s.items.splice(+b.dataset.rm, 1); route(); }));
     const add = $("#add");
-    const dl = await loadDishes();
+    const dl = dl0;
+    $$("[data-menu]").forEach((b) => (b.onclick = () => { const [n, k] = dl0[+b.dataset.menu]; s.items.push({ name: n, kcal: k, size: "M" }); toast(`${n} added`); route(); }));
     add.name.oninput = () => { const hit = dl.find(([d]) => d === add.name.value); if (hit) add.kcal.value = hit[1]; };
     add.onsubmit = (e) => {
       e.preventDefault();
@@ -1304,48 +1311,8 @@ async function admin() {
       </div>`).join("")}</div>`;
   }
 
-  if (adminTab === "dishes") {
-    const { data: dishes, error } = await sb.from("dishes").select("*").order("name");
-    if (error) throw error;
-    body = `
-      <form id="dish" class="card stack">
-        <b>Add a dish</b>
-        <div class="grid g2"><label>Name<input name="name" required maxlength="80" placeholder="Bún mắm"></label>
-        <label>kcal (medium portion)<input name="kcal" type="number" inputmode="numeric" min="0" required></label></div>
-        <button class="primary">Add dish</button>
-      </form>
-      <p class="muted">${dishes.length} dishes. Edit kcal and tap Save. Hidden dishes don’t show to users.</p>
-      <div class="list">${dishes.map((d) => `
-        <div class="row">
-          <div style="flex:1;min-width:0"><div style="${d.active ? "" : "color:var(--muted);text-decoration:line-through"}">${esc(d.name)}</div></div>
-          <input aria-label="kcal for ${esc(d.name)}" type="number" min="0" value="${d.kcal}" data-kcal="${d.id}" style="width:84px">
-          <button class="outline small" data-save="${d.id}">Save</button>
-          <button class="outline small" data-toggle="${d.id}" data-active="${d.active}">${d.active ? "Hide" : "Show"}</button>
-        </div>`).join("")}</div>`;
-  }
-
-  if (adminTab === "events") {
-    const { data: evs, error } = await sb.from("challenges").select("*").eq("official", true).order("starts_at", { ascending: false });
-    if (error) throw error;
-    const counts = await Promise.all(evs.map((e) => rpc("challenge_leaderboard", { cid: e.id })));
-    body = `
-      <form id="event" class="card stack">
-        <b>New official event</b>
-        <label>Name<input name="name" required maxlength="60" placeholder="Saigon Run Week"></label>
-        <div class="grid g2">
-          <label>Type<select name="metric"><option value="km">Most km run</option><option value="kcal">Most kcal burned</option></select></label>
-          <label>Starts<input name="start" type="date" required></label>
-          <label>Ends<input name="end" type="date" required></label>
-        </div>
-        <button class="primary">Publish event</button>
-        <p class="muted">Every user sees it on Challenges and can join.</p>
-      </form>
-      ${evs.length ? `<div class="list">${evs.map((e, i) => `
-        <div class="row"><div><div>${esc(e.name)}</div>
-          <div class="muted">${e.metric === "km" ? "Most km" : "Most kcal"} · ${new Date(e.starts_at).toLocaleDateString("en-GB")}–${new Date(e.ends_at).toLocaleDateString("en-GB")} · ${counts[i].length} joined</div></div>
-          <button class="outline small danger" data-del-ev="${e.id}">Delete</button></div>`).join("")}</div>`
-        : `<p class="muted">No official events yet.</p>`}`;
-  }
+  if (adminTab === "dishes") body = await adminDishesBody();
+  if (adminTab === "events") body = await adminEventsBody();
 
   if (adminTab === "ai") {
     const [{ data: rows, error }, st] = await Promise.all([
@@ -1407,33 +1374,178 @@ async function admin() {
     if (!confirm(`Delete ${b.dataset.name} and all their data? This cannot be undone.`)) return;
     try { await rpc("admin_delete_user", { uid: b.dataset.delete }); toast("User deleted"); route(); } catch (e) { fail(e); }
   }));
-  const dish = $("#dish");
-  if (dish) dish.onsubmit = async (e) => {
-    e.preventDefault();
-    const { error } = await sb.from("dishes").insert({ name: dish.name.value.trim(), kcal: +dish.kcal.value });
-    if (error) return fail(error.code === "23505" ? new Error("That dish already exists") : error);
-    dishCache = null; toast("Dish added"); route();
+  if (adminTab === "dishes") wireAdminDishes();
+  if (adminTab === "events") wireAdminEvents();
+}
+
+// ---------- ADMIN: DISHES ----------
+let adminDishes = [];
+let dishFilter = "";
+const FORK = '<path d="M7 3v8a3 3 0 0 0 3 3v7M10 3v6M13 3v8a3 3 0 0 1-3 3M17 3c-1.5 2-2 4-2 7h3v11"/>';
+const dishImg = (d, cls = "") => d.image_url
+  ? `<img class="dish-img ${cls}" src="${esc(d.image_url)}" alt="${esc(d.name)}" loading="lazy">`
+  : `<span class="dish-img ph ${cls}" aria-hidden="true">${sv(FORK)}</span>`;
+async function adminDishesBody() {
+  const { data, error } = await sb.from("dishes").select("*").order("name");
+  if (error) throw error;
+  adminDishes = data;
+  const missing = data.filter((d) => !d.image_url).length;
+  const q = dishFilter.toLowerCase();
+  const shown = data.filter((d) => !q || d.name.toLowerCase().includes(q));
+  return `
+    <div class="row" style="gap:8px">
+      <input id="dishSearch" type="search" placeholder="Search dishes" value="${esc(dishFilter)}" aria-label="Search dishes" style="flex:1">
+      <button class="primary small" id="addDish">+ Add</button>
+    </div>
+    <div class="row"><span class="muted">${data.length} dishes · ${data.length - missing} with photos</span>
+      ${missing ? `<button class="outline small" id="genMissing">${sv('<path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8zM19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/>')}<span>Photos for ${missing}</span></button>` : ""}</div>
+    <div class="dish-grid">${shown.map((d) => `
+      <button class="dish-card${d.active ? "" : " off"}" data-dish="${d.id}" aria-label="Edit ${esc(d.name)}">
+        ${dishImg(d)}
+        ${d.active ? "" : `<span class="dish-hidden">Hidden</span>`}
+        <span class="dish-body"><b>${esc(d.name)}</b><span class="dish-desc">${esc(d.description || "")}</span>
+        <span class="kcal-pill">${n0(d.kcal)} kcal</span></span>
+      </button>`).join("")}</div>
+    ${shown.length ? "" : `<p class="muted center">No dish matches “${esc(dishFilter)}”.</p>`}`;
+}
+async function genDishImage(id) {
+  const { data, error } = await sb.functions.invoke("dish-image", { body: { dish_id: id } });
+  if (error) { let m = error.message; try { m = (await error.context.json()).error || m; } catch { /* */ } throw new Error(/429|quota/i.test(m) ? "Google’s free plan doesn’t include image AI. Turn on billing (or redeem the free credits) in Google AI Studio, then try again." : m); }
+  if (data.error) throw new Error(/429|quota/i.test(data.error) ? "Google’s free plan doesn’t include image AI. Turn on billing (or redeem the free credits) in Google AI Studio, then try again." : data.error);
+  return data.image_url;
+}
+function dishForm(d = {}) {
+  return `
+    <div class="dish-hero" id="dHero">${d.id ? dishImg(d, "big") : `<span class="dish-img ph big" aria-hidden="true">${sv(FORK)}</span>`}</div>
+    <label>Name<input id="dName" maxlength="80" value="${esc(d.name || "")}" placeholder="Bún mắm" required></label>
+    <label>Description <span class="muted">(helps AI draw it right)</span><textarea id="dDesc" rows="2" maxlength="200" placeholder="Fermented fish noodle soup with seafood, eggplant and herbs">${esc(d.description || "")}</textarea></label>
+    <label>kcal (medium portion)
+      <div class="stepper"><button type="button" class="step-btn" data-k="-10" aria-label="Minus 10">${sv('<path d="M5 12h14"/>')}</button>
+      <input id="dKcal" type="number" inputmode="numeric" min="0" value="${d.kcal ?? ""}" placeholder="450" aria-label="kcal">
+      <button type="button" class="step-btn" data-k="10" aria-label="Plus 10">${sv('<path d="M12 5v14M5 12h14"/>')}</button></div></label>`;
+}
+function wireDishForm(el) {
+  el.querySelectorAll("[data-k]").forEach((b) => (b.onclick = () => { const k = el.querySelector("#dKcal"); k.value = Math.max(0, (+k.value || 0) + +b.dataset.k); }));
+}
+async function paintPhoto(el, id) {
+  const hero = el.querySelector("#dHero");
+  hero.innerHTML = `<span class="dish-img ph big drawing" aria-hidden="true">${sv('<path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/>')}</span><span class="muted center">AI is plating your dish… about 10–20 s</span>`;
+  try { const url = await genDishImage(id); hero.innerHTML = `<img class="dish-img big" src="${esc(url)}" alt="">`; return true; }
+  catch (e) { hero.innerHTML = `<span class="dish-img ph big">${sv(FORK)}</span><span class="danger center" style="font-size:13px">${esc(e.message.slice(0, 160))}</span>`; return false; }
+}
+function wireAdminDishes() {
+  const sx = $("#dishSearch");
+  sx.oninput = () => { dishFilter = sx.value; clearTimeout(sx.t); sx.t = setTimeout(() => route().then(() => { const n = $("#dishSearch"); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }), 250); };
+  $("#addDish").onclick = () => {
+    const s = openSheet("Add a dish", dishForm() + `
+      <label class="row" style="flex-direction:row;color:var(--ink);font-size:15px;justify-content:flex-start;gap:10px"><input type="checkbox" id="dAi" checked style="width:22px;min-height:22px"> Create a photo with AI (same style as the menu)</label>
+      <button class="primary block" id="dSave">Add dish</button>`);
+    wireDishForm(s.el);
+    s.el.querySelector("#dName").focus();
+    s.el.querySelector("#dSave").onclick = async (ev) => {
+      const name = s.el.querySelector("#dName").value.trim(), kcal = +s.el.querySelector("#dKcal").value;
+      if (!name || !(kcal > 0)) return toast("Add a name and kcal");
+      ev.target.disabled = true;
+      const { data, error } = await sb.from("dishes").insert({ name, kcal, description: s.el.querySelector("#dDesc").value.trim() || null }).select().single();
+      if (error) { ev.target.disabled = false; return fail(error.code === "23505" ? new Error("That dish already exists") : error); }
+      dishCache = null;
+      if (s.el.querySelector("#dAi").checked) { ev.target.textContent = "Creating photo…"; await paintPhoto(s.el, data.id); }
+      ev.target.textContent = "Done"; ev.target.disabled = false; ev.target.onclick = () => { s.close(); route(); };
+      toast(`${name} added`);
+    };
   };
-  $$("[data-save]").forEach((b) => (b.onclick = async () => {
-    const v = +app.querySelector(`[data-kcal="${b.dataset.save}"]`).value;
-    const { error } = await sb.from("dishes").update({ kcal: v, updated_at: new Date().toISOString() }).eq("id", b.dataset.save);
-    if (error) return fail(error);
-    dishCache = null; toast("Saved");
+  $$("[data-dish]").forEach((b) => (b.onclick = () => {
+    const d = adminDishes.find((x) => x.id === b.dataset.dish);
+    const s = openSheet("Edit dish", dishForm(d) + `
+      <div class="grid g2">
+        <button class="outline" id="dRegen">${d.image_url ? "New photo" : "Create photo"}</button>
+        <button class="outline" id="dToggle">${d.active ? "Hide from users" : "Show to users"}</button>
+      </div>
+      <button class="primary block" id="dSave">Save</button>`);
+    wireDishForm(s.el);
+    s.el.querySelector("#dRegen").onclick = async (ev) => { ev.target.disabled = true; await paintPhoto(s.el, d.id); ev.target.disabled = false; dishCache = null; };
+    s.el.querySelector("#dToggle").onclick = async () => {
+      const { error } = await sb.from("dishes").update({ active: !d.active }).eq("id", d.id);
+      if (error) return fail(error); dishCache = null; s.close(); route();
+    };
+    s.el.querySelector("#dSave").onclick = async () => {
+      const { error } = await sb.from("dishes").update({ name: s.el.querySelector("#dName").value.trim(), description: s.el.querySelector("#dDesc").value.trim() || null, kcal: +s.el.querySelector("#dKcal").value, updated_at: new Date().toISOString() }).eq("id", d.id);
+      if (error) return fail(error); dishCache = null; s.close(); toast("Saved"); route();
+    };
   }));
-  $$("[data-toggle]").forEach((b) => (b.onclick = async () => {
-    const { error } = await sb.from("dishes").update({ active: b.dataset.active !== "true" }).eq("id", b.dataset.toggle);
-    if (error) return fail(error);
-    dishCache = null; route();
-  }));
-  const ev = $("#event");
-  if (ev) ev.onsubmit = async (e) => {
-    e.preventDefault();
-    const starts = new Date(ev.start.value + "T00:00"); const ends = new Date(ev.end.value + "T23:59");
-    if (ends <= starts) return toast("End date must be after start");
-    try {
-      await rpc("create_official_challenge", { p_name: ev.name.value.trim(), p_metric: ev.metric.value, p_starts: starts.toISOString(), p_ends: ends.toISOString() });
-      toast("Event published"); route();
-    } catch (err) { fail(err); }
+  const gm = $("#genMissing");
+  if (gm) gm.onclick = async () => {
+    const todo = adminDishes.filter((d) => !d.image_url);
+    if (!confirm(`Create AI photos for ${todo.length} dishes? This takes about ${Math.ceil(todo.length * 15 / 60)} min. Keep the app open.`)) return;
+    gm.disabled = true; let ok = 0;
+    for (const [i, d] of todo.entries()) {
+      gm.querySelector("span").textContent = `${i + 1}/${todo.length}: ${d.name}`;
+      try { await genDishImage(d.id); ok++; } catch (e) { toast(`${d.name}: ${e.message.slice(0, 90)}`); if (/quota|429|403|billing/i.test(e.message)) break; }
+    }
+    dishCache = null; toast(`${ok} photos created`); route();
+  };
+}
+
+// ---------- ADMIN: EVENTS ----------
+async function adminEventsBody() {
+  const { data: evs, error } = await sb.from("challenges").select("*").eq("official", true).order("starts_at", { ascending: false });
+  if (error) throw error;
+  const boards = await Promise.all(evs.map((e) => rpc("challenge_leaderboard", { cid: e.id }).catch(() => [])));
+  const now = Date.now();
+  const fmtD = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  return `
+    <div class="row"><span class="muted">${evs.length} official event${evs.length === 1 ? "" : "s"}</span><button class="primary small" id="newEvent">+ New event</button></div>
+    ${evs.length ? evs.map((e, i) => {
+      const st = new Date(e.starts_at).getTime(), en = new Date(e.ends_at).getTime();
+      const status = now < st ? "Upcoming" : now > en ? "Ended" : "Live";
+      const pct = Math.max(0, Math.min(100, ((now - st) / (en - st)) * 100));
+      const rows = boards[i]; const lead = rows[0];
+      const fmt = (v) => (e.metric === "km" ? `${n1(v)} km` : `${n0(v)} kcal`);
+      const days = Math.ceil((status === "Upcoming" ? st - now : en - now) / 864e5);
+      return `<article class="event-card ${status.toLowerCase()}">
+        <div class="ev-top">
+          <span class="ev-ic">${sv(e.metric === "km" ? '<path d="M3 16l2-8 4 2 3-1 2 3 6 2a2 2 0 0 1 1 2v1H3zM3 19h18"/>' : '<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3 0-3 0-5 1-8.5z"/>')}</span>
+          <span class="ev-chip ${status.toLowerCase()}">${status === "Live" ? "● " : ""}${status}</span>
+        </div>
+        <h3>${esc(e.name)}</h3>
+        <p class="ev-meta">${e.metric === "km" ? "Most km run" : "Most kcal burned"} · ${fmtD(e.starts_at)} – ${fmtD(e.ends_at)}${status !== "Ended" ? ` · ${days} day${days === 1 ? "" : "s"} ${status === "Upcoming" ? "to start" : "left"}` : ""}</p>
+        <div class="ev-bar" role="img" aria-label="${Math.round(pct)}% of the event time has passed"><span style="width:${pct}%"></span></div>
+        <div class="ev-stats">
+          <div><b>${rows.length}</b><span>joined</span></div>
+          <div><b>${lead ? esc(lead.display_name) : "—"}</b><span>${lead ? `leading · ${fmt(lead.score)}` : "no leader yet"}</span></div>
+        </div>
+        <div class="row" style="justify-content:flex-end"><button class="outline small danger" data-del-ev="${e.id}">Delete</button></div>
+      </article>`;
+    }).join("") : `<div class="card center stack" style="align-items:center"><span class="ev-ic big">${sv('<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>')}</span><b>No events yet</b><p class="muted">Publish a city-wide challenge everyone can join.</p></div>`}`;
+}
+function wireAdminEvents() {
+  $("#newEvent").onclick = () => {
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+    const wk = new Date(Date.now() + 6 * 864e5 - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+    const s = openSheet("New official event", `
+      <label>Name<input id="eName" maxlength="60" placeholder="Saigon Run Week"></label>
+      <div class="seg" role="radiogroup" aria-label="Event type">
+        <button type="button" role="radio" aria-pressed="true" aria-checked="true" data-m="km">Most km run</button>
+        <button type="button" role="radio" aria-pressed="false" aria-checked="false" data-m="kcal">Most kcal burned</button>
+      </div>
+      <div class="grid g2"><label>Starts<input id="eStart" type="date" value="${today}"></label><label>Ends<input id="eEnd" type="date" value="${wk}"></label></div>
+      <div class="chips"><button type="button" class="chip" data-len="7">1 week</button><button type="button" class="chip" data-len="14">2 weeks</button><button type="button" class="chip" data-len="30">30 days</button></div>
+      <button class="primary block" id="ePub">Publish event</button>
+      <p class="muted">Every user sees it at the top of Challenges with a Join button.</p>`);
+    let metric = "km";
+    s.el.querySelectorAll("[data-m]").forEach((b) => (b.onclick = () => { metric = b.dataset.m; s.el.querySelectorAll("[data-m]").forEach((x) => { x.setAttribute("aria-pressed", x === b); x.setAttribute("aria-checked", x === b); }); }));
+    s.el.querySelectorAll("[data-len]").forEach((b) => (b.onclick = () => {
+      const st = new Date(s.el.querySelector("#eStart").value || today); st.setDate(st.getDate() + +b.dataset.len - 1);
+      s.el.querySelector("#eEnd").value = st.toISOString().slice(0, 10);
+    }));
+    s.el.querySelector("#ePub").onclick = async () => {
+      const name = s.el.querySelector("#eName").value.trim();
+      const starts = new Date(s.el.querySelector("#eStart").value + "T00:00"), ends = new Date(s.el.querySelector("#eEnd").value + "T23:59");
+      if (!name) return toast("Give the event a name");
+      if (ends <= starts) return toast("End date must be after start");
+      try { await rpc("create_official_challenge", { p_name: name, p_metric: metric, p_starts: starts.toISOString(), p_ends: ends.toISOString() }); s.close(); toast("Event published"); route(); }
+      catch (e) { fail(e); }
+    };
   };
   $$("[data-del-ev]").forEach((b) => (b.onclick = async () => {
     if (!confirm("Delete this event for everyone?")) return;
