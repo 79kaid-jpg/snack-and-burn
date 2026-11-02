@@ -1,7 +1,7 @@
 -- Snack & Burn – Supabase schema
 -- Run this once in Supabase: SQL Editor → New query → paste → Run.
 
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 -- ---------- Profiles ----------
 create table if not exists public.profiles (
@@ -15,7 +15,7 @@ create table if not exists public.profiles (
   budget_kcal int not null default 2000,
   visibility text not null default 'friends' check (visibility in ('everyone','friends','off')),
   serious_mode boolean not null default false,
-  invite_code text unique not null default substr(encode(gen_random_bytes(6),'hex'),1,8),
+  invite_code text unique not null default substr(encode(extensions.gen_random_bytes(6),'hex'),1,8),
   onboarded boolean not null default false,
   lat numeric,           -- rounded to ~100 m, never exact
   lng numeric,
@@ -264,3 +264,16 @@ language sql stable security definer set search_path = public as $$
        and (select l.user_id from public.challenge_leaderboard(c.id) l limit 1) = auth.uid()),
     public.my_streak();
 $$;
+
+-- Only signed-in users may call the app functions
+revoke execute on function public.handle_new_user() from anon, authenticated, public;
+do $$
+declare f text;
+begin
+  foreach f in array array['add_friend(uuid)','add_friend_by_code(text)','challenge_leaderboard(uuid)',
+    'create_challenge(text,text,timestamptz,timestamptz,uuid[])','friends_week()','is_friend(uuid,uuid)',
+    'is_member(uuid)','my_badges()','my_streak()','nearby_users(numeric)','update_location(numeric,numeric)'] loop
+    execute format('revoke execute on function public.%s from public, anon', f);
+    execute format('grant execute on function public.%s to authenticated', f);
+  end loop;
+end $$;
