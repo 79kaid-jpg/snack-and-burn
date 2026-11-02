@@ -29,7 +29,7 @@ If nothing edible is mentioned, reply {"items":[]}.`;
 type Settings = { provider: string; claudeModel: string; geminiModel: string };
 
 async function loadSettings(): Promise<Settings> {
-  const s: Settings = { provider: "gemini", claudeModel: "claude-sonnet-5-5", geminiModel: "gemini-flash-latest" };
+  const s: Settings = { provider: "gemini", claudeModel: "claude-sonnet-5-5", geminiModel: "gemini-flash-lite-latest" };
   try {
     const url = Deno.env.get("SUPABASE_URL");
     const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -62,7 +62,7 @@ async function askClaude(model: string, image: string | null, mediaType: string,
   return data.content?.find((c: { type: string }) => c.type === "text")?.text ?? "{}";
 }
 
-async function askGemini(model: string, image: string | null, mediaType: string, text?: string): Promise<string> {
+async function askGeminiOnce(model: string, image: string | null, mediaType: string, text: string | undefined, ms: number): Promise<string> {
   const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: "POST",
     headers: { "x-goog-api-key": Deno.env.get("GEMINI_API_KEY")!, "content-type": "application/json" },
@@ -70,12 +70,24 @@ async function askGemini(model: string, image: string | null, mediaType: string,
       contents: [{ parts: image ? [{ inline_data: { mime_type: mediaType, data: image } }, { text: PROMPT }] : [{ text: TEXT_PROMPT(text ?? "") }] }],
       generationConfig: { responseMimeType: "application/json", maxOutputTokens: 4096 },
     }),
-    signal: AbortSignal.timeout(45000),
+    signal: AbortSignal.timeout(ms),
   });
   if (!r.ok) throw new Error(`Gemini: ${r.status} ${(await r.text()).slice(0, 300)}`);
   const data = await r.json();
   console.log("gemini finish:", data.candidates?.[0]?.finishReason, "usage:", JSON.stringify(data.usageMetadata ?? {}));
   return data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? "").join("") ?? "{}";
+}
+
+// If the chosen model is slow or failing, retry once with the fast lite model.
+const GEMINI_FALLBACK = "gemini-flash-lite-latest";
+async function askGemini(model: string, image: string | null, mediaType: string, text?: string): Promise<string> {
+  try {
+    return await askGeminiOnce(model, image, mediaType, text, model === GEMINI_FALLBACK ? 40000 : 20000);
+  } catch (e) {
+    if (model === GEMINI_FALLBACK) throw e;
+    console.warn(`gemini ${model} failed (${String(e).slice(0, 120)}); retrying with ${GEMINI_FALLBACK}`);
+    return await askGeminiOnce(GEMINI_FALLBACK, image, mediaType, text, 30000);
+  }
 }
 
 Deno.serve(async (req) => {
