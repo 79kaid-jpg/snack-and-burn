@@ -1,4 +1,4 @@
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+import { createClient } from "./vendor/supabase-2.118.0.js";
 
 const cfg = window.SNB_CONFIG || {};
 const app = document.getElementById("app");
@@ -71,17 +71,25 @@ async function loadDishes(force) {
 const VIEWS = { home, snap, challenges, friends, profileView, admin, coach, badges: badgesView };
 let snapState = null;
 
+function saveProfile() { try { localStorage.setItem("snb_profile", JSON.stringify(profile)); } catch { /* ignore */ } }
 async function route() {
   const { data } = await sb.auth.getSession();
   user = data.session?.user ?? null;
   if (!user) { tabs.hidden = true; return login(); }
   if (!profile || profile.id !== user.id) {
-    const { data: p, error } = await sb.from("profiles")
-      .select("id,display_name,sex,age,height_cm,weight_kg,activity,budget_kcal,visibility,serious_mode,invite_code,onboarded,is_admin,blocked,notify_meals,notify_burn,notify_challenge")
-      .eq("id", user.id).single();
-    if (error) return fail(error);
-    profile = p;
-    await redeemInvite();
+    const PCOLS = "id,display_name,sex,age,height_cm,weight_kg,activity,budget_kcal,visibility,serious_mode,invite_code,onboarded,is_admin,blocked,notify_meals,notify_burn,notify_challenge";
+    const fresh = sb.from("profiles").select(PCOLS).eq("id", user.id).single();
+    let cached = null; try { cached = JSON.parse(localStorage.getItem("snb_profile") || "null"); } catch { /* ignore */ }
+    if (cached && cached.id === user.id) {
+      // open instantly with the saved profile, refresh it in the background
+      profile = cached;
+      fresh.then(({ data: p }) => { if (p) { const changed = JSON.stringify(p) !== JSON.stringify(profile); profile = p; saveProfile(); if (changed) route(); } });
+    } else {
+      const { data: p, error } = await fresh;
+      if (error) return fail(error);
+      profile = p; saveProfile();
+    }
+    redeemInvite();
   }
   if (profile.blocked) {
     tabs.hidden = true;
@@ -95,7 +103,8 @@ async function route() {
   const key = name === "profile" ? "profileView" : name;
   const view = VIEWS[key] || home;
   tabs.querySelectorAll("a").forEach((a) => a.classList.toggle("active", a.dataset.tab === name));
-  app.innerHTML = `<div class="skel" style="height:36px;width:60%"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:64px"></div><div class="skel" style="height:64px"></div>`;
+  let snap = null; if (key === "home") { try { snap = localStorage.getItem("snb_home"); } catch { /* */ } }
+  if (snap) app.innerHTML = `<div class="snapshot" aria-busy="true">${snap}</div>`; else app.innerHTML = `<div class="skel" style="height:36px;width:60%"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:64px"></div><div class="skel" style="height:64px"></div>`;
   try { await view(new URLSearchParams(query || "")); } catch (e) { fail(e); }
   window.scrollTo(0, 0);
 }
@@ -202,7 +211,7 @@ function wireStats(onDone, root = app) {
     const patch = { ...v, budget_kcal: tdee(v), onboarded: true };
     const { error } = await sb.from("profiles").update(patch).eq("id", user.id);
     if (error) return fail(error);
-    Object.assign(profile, patch);
+    Object.assign(profile, patch); saveProfile();
     const day = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
     await sb.from("weights").upsert({ day, kg: v.weight_kg }, { onConflict: "user_id,day" });
     onDone();
@@ -219,10 +228,10 @@ async function home(q) {
   const since = startOfToday();
   const wk0 = new Date(); wk0.setHours(0, 0, 0, 0); wk0.setDate(wk0.getDate() - 6);
   const d60 = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
-  await loadDishes();
-  const wRes = await sb.from("weights").select("day,kg").gte("day", d60).order("day");
-  const wts = wRes.data || [];
-  const [meals, acts, streak, wkMeals, wkActs, chs] = await Promise.all([
+  // everything Home needs, fetched in parallel (one round trip instead of several)
+  const [, wRes, meals, acts, streak, wkMeals, wkActs, chs] = await Promise.all([
+    loadDishes(),
+    sb.from("weights").select("day,kg").gte("day", d60).order("day"),
     sb.from("meals").select("*").gte("eaten_at", since).order("eaten_at"),
     sb.from("activities").select("*").gte("started_at", since).order("started_at"),
     rpc("my_streak"),
@@ -230,6 +239,7 @@ async function home(q) {
     sb.from("activities").select("kcal,distance_km,kind,started_at").gte("started_at", wk0.toISOString()),
     sb.from("challenges").select("id,name,metric,ends_at,official").gt("ends_at", new Date().toISOString()).order("ends_at").limit(5),
   ]);
+  const wts = wRes.data || [];
   // this week, per day
   const days = [...Array(7)].map((_, i) => { const d = new Date(wk0); d.setDate(d.getDate() + i); return { d, eat: 0, burn: 0 }; });
   const dayIdx = (iso) => Math.floor((new Date(iso) - wk0) / 864e5);
@@ -239,11 +249,12 @@ async function home(q) {
   const onTarget = days.filter((x) => x.eat > 0 && x.eat - x.burn <= profile.budget_kcal).length;
   // my live challenge: the first one I am in
   let myCh = null;
-  for (const c of chs.data || []) {
-    const rows = await rpc("challenge_leaderboard", { cid: c.id }).catch(() => []);
-    const i = rows.findIndex((x) => x.user_id === user.id);
-    if (i >= 0) { myCh = { c, rank: i + 1, of: rows.length, score: rows[i].score, lead: rows[0] }; break; }
-  }
+  const boards = await Promise.all((chs.data || []).map((c) => rpc("challenge_leaderboard", { cid: c.id }).catch(() => [])));
+  (chs.data || []).some((c, k) => {
+    const rows = boards[k]; const i = rows.findIndex((x) => x.user_id === user.id);
+    if (i >= 0) { myCh = { c, rank: i + 1, of: rows.length, score: rows[i].score, lead: rows[0] }; return true; }
+    return false;
+  });
   if (meals.error) throw meals.error;
   if (acts.error) throw acts.error;
   const eaten = meals.data.reduce((s, m) => s + m.kcal, 0);
@@ -343,6 +354,7 @@ async function home(q) {
   const eb = $("#emptyBurn"); if (eb) eb.onclick = () => openBurnSheet();
   loadCoachTip();
   checkBadges();
+  try { localStorage.setItem("snb_home", app.innerHTML); } catch { /* ignore */ }
   if (q.get("log")) { history.replaceState(null, "", "#home"); openBurnSheet({ kind: "run", km: +q.get("km") || 0 }); }
   $$("[data-del-meal]").forEach((b) => (b.onclick = async () => { await sb.from("meals").delete().eq("id", b.dataset.delMeal); route(); }));
   $$("[data-del-act]").forEach((b) => (b.onclick = async () => { await sb.from("activities").delete().eq("id", b.dataset.delAct); route(); }));
@@ -1284,7 +1296,7 @@ async function profileView() {
     if (error) return fail(error);
     profile.serious_mode = v; route();
   };
-  $("#out").onclick = async () => { if (!confirm("Sign out of Snack & Burn?")) return; await sb.auth.signOut(); location.hash = ""; };
+  $("#out").onclick = async () => { if (!confirm("Sign out of Snack & Burn?")) return; try { localStorage.removeItem("snb_profile"); localStorage.removeItem("snb_home"); } catch { /* */ } await sb.auth.signOut(); location.hash = ""; };
 }
 
 // ---------- ADMIN ----------
@@ -1689,7 +1701,8 @@ function showInstallGuide(force) {
 }
 
 (async () => {
-  APP_VERSION = (await fetchVersion()) || "dev";
+  fetchVersion().then((v) => { APP_VERSION = v || "dev"; });
   await route();
+  document.getElementById("splash")?.remove();
   setTimeout(() => { if (user) showInstallGuide(false); }, 1500);
 })();
