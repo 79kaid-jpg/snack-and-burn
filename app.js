@@ -1068,11 +1068,27 @@ async function challenges(q) {
 }
 
 // ---------- FRIENDS ----------
-let friendsTab = "friends";
+let friendsTab = "feed";
 async function friends() {
   const inviteUrl = `${location.origin}${location.pathname}?invite=${profile.invite_code}`;
   let body = "";
-  if (friendsTab === "friends") {
+  if (friendsTab === "feed") {
+    const feed = await rpc("friend_feed", { p_limit: 40 }).catch(() => []);
+    const ACT = { steps: "👟 Steps", run: "🏃 Run", walk: "🚶 Walk", rope: "🪢 Jump rope", cycle: "🚴 Ride", other: "💪 Workout" };
+    const ago = (t) => { const m = Math.round((Date.now() - new Date(t)) / 6e4); return m < 60 ? `${Math.max(1, m)}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`; };
+    body = feed.length ? `<div class="stack">${feed.map((a) => {
+      const what = a.steps > 0 ? `${n0(a.steps)} steps` : [a.distance_km ? `${n1(a.distance_km)} km` : "", a.minutes ? `${a.minutes} min` : ""].filter(Boolean).join(" · ");
+      return `<div class="card feed-item">
+        <div class="row"><div class="row" style="justify-content:flex-start"><span class="avatar" style="background:${COLORS[(a.display_name || "?").charCodeAt(0) % 5]}">${initial(a.display_name)}</span>
+        <div><b>${a.is_me ? "You" : esc(a.display_name)}</b><div class="muted">${ACT[a.kind] || ACT.other} · ${ago(a.started_at)} ago</div></div></div>
+        <b>${n0(a.kcal)} kcal</b></div>
+        ${what ? `<div class="muted">${what}</div>` : ""}
+        <div class="row">
+          ${a.is_me ? `<span class="muted">${a.kudos_count ? `🔥 ${a.kudos_count} kudos` : "No kudos yet"}</span>`
+            : `<button class="kudos ${a.i_kudoed ? "on" : ""}" data-kudo="${a.activity_id}" aria-pressed="${a.i_kudoed}">🔥 <span>${a.kudos_count || ""}</span> Kudos</button>`}
+        </div></div>`; }).join("")}</div>`
+      : `<div class="card"><p>Your feed is quiet.</p><p class="muted">Add friends and log a burn. Their runs, walks and steps show up here for 7 days.</p></div>`;
+  } else if (friendsTab === "friends") {
     const list = await rpc("friends_week");
     body = list.length ? `<div class="list">${list.map((f, i) => `
       <div class="row"><div class="row" style="justify-content:flex-start"><span class="avatar" style="background:${COLORS[i % 5]}">${initial(f.display_name)}</span>
@@ -1093,6 +1109,7 @@ async function friends() {
   app.innerHTML = `
     <div class="row"><h1>Friends</h1><button class="primary small" id="invite">Invite</button></div>
     <div class="seg" role="group" aria-label="Friends view">
+      <button aria-pressed="${friendsTab === "feed"}" data-t="feed">Feed</button>
       <button aria-pressed="${friendsTab === "friends"}" data-t="friends">My friends</button>
       <button aria-pressed="${friendsTab === "nearby"}" data-t="nearby">Nearby · 2 km</button>
     </div>
@@ -1113,6 +1130,16 @@ async function friends() {
     e.preventDefault();
     try { await rpc("add_friend_by_code", { code: e.target.code.value }); toast("Friend added!"); route(); } catch (err) { fail(err); }
   };
+  $$("[data-kudo]").forEach((b) => (b.onclick = async () => {
+    b.disabled = true;
+    try {
+      const on = await rpc("toggle_kudos", { p_activity: b.dataset.kudo });
+      const c = b.querySelector("span"); const n = (+c.textContent || 0) + (on ? 1 : -1);
+      c.textContent = n || ""; b.classList.toggle("on", on); b.setAttribute("aria-pressed", on);
+      if (on) { navigator.vibrate?.(15); sb.functions.invoke("send-reminders", { body: { kudos: b.dataset.kudo } }).catch(() => {}); }
+    } catch (err) { fail(err); }
+    b.disabled = false;
+  }));
   $$("[data-vis]").forEach((b) => (b.onclick = async () => {
     const { error } = await sb.from("profiles").update({ visibility: b.dataset.vis }).eq("id", user.id);
     if (error) return fail(error);

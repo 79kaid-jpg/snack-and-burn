@@ -57,6 +57,19 @@ Deno.serve(async (req) => {
       return json({ sent: n });
     }
 
+    // 1b) Kudos push: a signed-in friend just gave kudos on an activity
+    if (body.kudos) {
+      const token = (req.headers.get("authorization") ?? "").replace(/^Bearer /i, "");
+      const { data: u } = await db.auth.getUser(token);
+      if (!u?.user) return json({ error: "Sign in first" }, 401);
+      const { data: k } = await db.from("kudos").select("activity_id, activities!inner(user_id,kind,kcal)").eq("activity_id", body.kudos).eq("user_id", u.user.id).maybeSingle();
+      if (!k) return json({ sent: 0 });
+      const act = (k as unknown as { activities: { user_id: string; kind: string; kcal: number } }).activities;
+      const { data: me } = await db.from("profiles").select("display_name").eq("id", u.user.id).single();
+      const n = await sendTo(act.user_id, { title: "🔥 Kudos!", body: `${me?.display_name ?? "Một người bạn"} vừa thả kudos cho buổi ${act.kcal} kcal của bạn.`, url: APP_URL + "#friends", tag: "kudos-" + body.kudos });
+      return json({ sent: n });
+    }
+
     // 2) Scheduled run
     if (req.headers.get("x-cron-secret") !== sec.cron_secret) return json({ error: "Forbidden" }, 403);
     const now = new Date(Date.now() + 7 * 3600e3); // Vietnam time

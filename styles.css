@@ -310,3 +310,9 @@ main:has(.save-bar:not([hidden])) { padding-bottom: 200px; }
 .coach-tip.fade { opacity: 0; }
 
 .avatar { color: #1A1A1A; }
+
+/* friend feed */
+.feed-item{gap:8px}
+.kudos{background:var(--card);border:1px solid var(--border);color:var(--ink);border-radius:999px;padding:8px 14px;font:inherit;font-weight:600;min-height:44px}
+.kudos.on{background:var(--burn);border-color:var(--burn);color:var(--on-accent)}
+.kudos:active{transform:scale(.95)}
