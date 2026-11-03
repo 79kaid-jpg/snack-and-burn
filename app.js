@@ -824,10 +824,10 @@ async function snap() {
       <div class="menu-strip">${dl0.map(([n, k, img], i) => `<button class="menu-item" data-menu="${i}">
         ${img ? `<img src="${esc(img)}" alt="" loading="lazy">` : `<span class="menu-ph">${sv(FORK)}</span>`}
         <b>${esc(n)}</b><span>${n0(k)} kcal</span></button>`).join("")}</div>
-      <form id="add" class="card stack">
-        <label>Add a dish<input name="name" list="dishes" placeholder="e.g. Phở bò" autocomplete="off"></label>
+      <form id="add" class="card stack" novalidate>
+        <label>Add a dish<input id="addName" list="dishes" placeholder="e.g. Phở bò" autocomplete="off" enterkeyhint="done"></label>
         <datalist id="dishes">${(await loadDishes()).map(([d]) => `<option value="${esc(d)}">`).join("")}</datalist>
-        <div class="row"><label style="flex:1">kcal (medium portion)<input name="kcal" type="number" inputmode="numeric" min="0"></label><button class="outline small" style="align-self:flex-end">Add</button></div>
+        <div class="row"><label style="flex:1">kcal (medium portion)<input id="addKcal" type="number" inputmode="numeric" min="0" placeholder="Leave empty, AI will estimate"></label><button type="submit" class="primary small" id="addBtn" style="align-self:flex-end">Add</button></div>
       </form>
       <div class="row"><span>Meal total</span><b>${n0(total)} kcal</b></div>
       <p class="muted">AI estimate, ±20%${s.provider ? ` · read by ${s.provider === "claude" ? "Claude" : "Gemini"}` : ""}</p>
@@ -835,15 +835,38 @@ async function snap() {
       <button class="outline block" id="retake">Start over</button>`;
     $$("[data-z]").forEach((b) => (b.onclick = () => { s.items[b.dataset.i].size = b.dataset.z; route(); }));
     $$("[data-rm]").forEach((b) => (b.onclick = () => { s.items.splice(+b.dataset.rm, 1); route(); }));
-    const add = $("#add");
-    const dl = dl0;
+    const add = $("#add"), nameIn = $("#addName"), kcalIn = $("#addKcal");
+    // re-render in place without jumping to the top
+    const rerender = () => { const y = window.scrollY; route().then(() => window.scrollTo(0, y)); };
     $$("[data-menu]").forEach((b) => (b.onclick = () => { const [n, k] = dl0[+b.dataset.menu]; s.items.push({ name: n, kcal: k, size: "M" }); toast(`${n} added`); route(); }));
-    add.name.oninput = () => { const hit = dl.find(([d]) => d === add.name.value); if (hit) add.kcal.value = hit[1]; };
-    add.onsubmit = (e) => {
+    const fill = () => { const hit = dl0.find(([d]) => d.toLowerCase() === nameIn.value.trim().toLowerCase()); if (hit) kcalIn.value = hit[1]; };
+    nameIn.oninput = fill; nameIn.onchange = fill;
+    add.onsubmit = async (e) => {
       e.preventDefault();
-      const name = add.name.value.trim(); const kcal = +add.kcal.value;
-      if (!name || !(kcal >= 0)) return toast("Add a dish name and its kcal");
-      s.items.push({ name, kcal, size: "M" }); route();
+      const name = nameIn.value.trim();
+      if (!name) { nameIn.focus(); return toast("Type a dish name first"); }
+      fill();
+      let kcal = kcalIn.value === "" ? NaN : +kcalIn.value;
+      const btn = $("#addBtn");
+      if (!(kcal >= 0)) {
+        // no kcal typed: ask the AI to estimate this one dish
+        btn.disabled = true; btn.textContent = "…";
+        try {
+          const { data, error } = await sb.functions.invoke("analyze-meal", { body: { text: name } });
+          if (error || data.error) throw new Error(data?.error || error.message);
+          const found = data.items || [];
+          if (!found.length) throw new Error("none");
+          found.forEach((i) => s.items.push({ name: i.name, kcal: i.kcal, size: "M" }));
+          toast(`${found.map((i) => i.name).join(", ")} added`);
+          return rerender();
+        } catch {
+          btn.disabled = false; btn.textContent = "Add";
+          kcalIn.focus(); return toast("Couldn’t estimate it. Type the kcal and tap Add.");
+        }
+      }
+      s.items.push({ name, kcal, size: "M" });
+      toast(`${name} added`);
+      rerender();
     };
     $("#retake").onclick = () => { snapState = null; route(); };
     $("#calc").onclick = async () => {
