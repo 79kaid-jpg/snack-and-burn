@@ -1553,6 +1553,37 @@ function wireAdminEvents() {
   }));
 }
 
+// ---------- SHOW / HIDE PASSWORD ----------
+// Adds an eye button to every password field (sign-in, create account, change password).
+const EYE = '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+const EYE_OFF = '<path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.1 4M6.6 6.6C3.8 8.4 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2"/>';
+function addPasswordToggles(root) {
+  root.querySelectorAll('input[type="password"]:not([data-eye])').forEach((inp) => {
+    inp.dataset.eye = "1";
+    const wrap = document.createElement("span");
+    wrap.className = "pw-wrap";
+    inp.parentNode.insertBefore(wrap, inp);
+    wrap.appendChild(inp);
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pw-eye";
+    btn.setAttribute("aria-label", "Show password");
+    btn.setAttribute("aria-pressed", "false");
+    btn.innerHTML = sv(EYE);
+    btn.onclick = () => {
+      const show = inp.type === "password";
+      const pos = inp.selectionStart;
+      inp.type = show ? "text" : "password";
+      btn.innerHTML = sv(show ? EYE_OFF : EYE);
+      btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      btn.setAttribute("aria-pressed", String(show));
+      inp.focus(); try { inp.setSelectionRange(pos, pos); } catch { /* ignore */ }
+    };
+    wrap.appendChild(btn);
+  });
+}
+new MutationObserver(() => addPasswordToggles(document.body)).observe(document.body, { childList: true, subtree: true });
+
 // ---------- PWA ----------
 let APP_VERSION = "dev";
 let swReg = null;
