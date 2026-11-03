@@ -83,7 +83,12 @@ async function route() {
     if (cached && cached.id === user.id) {
       // open instantly with the saved profile, refresh it in the background
       profile = cached;
-      fresh.then(({ data: p }) => { if (p) { const changed = JSON.stringify(p) !== JSON.stringify(profile); profile = p; saveProfile(); if (changed) route(); } });
+      fresh.then(({ data: p }) => {
+        if (!p) return;
+        const changed = Object.keys(p).some((k) => String(p[k]) !== String(profile[k]));
+        profile = p; saveProfile();
+        if (changed) { const y = window.scrollY; route().then(() => window.scrollTo(0, y)); }
+      });
     } else {
       const { data: p, error } = await fresh;
       if (error) return fail(error);
@@ -305,7 +310,7 @@ async function home(q) {
 
   <a class="coach-card" href="#coach">
     <span class="coach-av" aria-hidden="true">${COACH_FACE}</span>
-    <span style="min-width:0;flex:1"><b>Coach</b><span class="muted coach-tip" id="coachTip">Your weekly check-in is ready. Tap to read.</span></span>
+    <span style="min-width:0;flex:1"><b>Coach</b><span class="muted coach-tip" id="coachTip">${esc(cachedTip() || "Your weekly check-in is ready. Tap to read.")}</span></span>
     ${sv('<path d="M9 6l6 6-6 6"/>')}
   </a>
 
@@ -507,13 +512,27 @@ async function openGiftSheet(uid, name) {
 
 // ---------- AI COACH ----------
 const COACH_FACE = `<svg viewBox="0 0 40 40" width="40" height="40" aria-hidden="true"><circle cx="20" cy="20" r="20" fill="#1A1A1A"/><path d="M20 7c1.4 4.2 7 7 7 13.5a7 7 0 0 1-14 0c0-2.8 1.4-4.9 2.8-6.3.4 2.1 1.4 3.5 2.8 4.2 0-4.2 0-7 1.4-11.4z" fill="#D93A1E"/><circle cx="17.5" cy="22" r="1.4" fill="#FFF8EE"/><circle cx="22.5" cy="22" r="1.4" fill="#FFF8EE"/><path d="M17.5 25.5q2.5 2 5 0" stroke="#FFF8EE" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>`;
+const tipDay = () => new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+function cachedTip() {
+  try { const t = JSON.parse(localStorage.getItem("snb_tip") || "null"); return t && t.user === user?.id ? t.text : ""; } catch { return ""; }
+}
+let tipLoading = false;
 async function loadCoachTip() {
+  // the tip only changes once a day: skip the AI call if today's is already saved
+  try { const t = JSON.parse(localStorage.getItem("snb_tip") || "null"); if (t && t.user === user.id && t.day === tipDay()) return; } catch { /* fetch */ }
+  if (tipLoading) return; tipLoading = true;
   try {
     const { data } = await sb.functions.invoke("coach", { body: { mode: "weekly" } });
-    const tip = (data?.report || "").split("\n").find((l) => /^Mẹo hôm nay/i.test(l.trim())) || (data?.report || "").split("\n")[0];
+    const lines = (data?.report || "").split("\n").map((l) => l.trim()).filter(Boolean);
+    const tip = lines.find((l) => /^Mẹo hôm nay/i.test(l)) || lines[0];
+    if (!tip) return;
+    try { localStorage.setItem("snb_tip", JSON.stringify({ user: user.id, day: tipDay(), text: tip })); } catch { /* ignore */ }
     const el = document.getElementById("coachTip");
-    if (el && tip) el.textContent = tip.trim();
-  } catch { /* keep default text */ }
+    if (el && el.textContent !== tip) {
+      el.classList.add("fade"); // soft cross-fade instead of a jump
+      setTimeout(() => { el.textContent = tip; el.classList.remove("fade"); try { localStorage.setItem("snb_home", app.innerHTML); } catch { /* */ } }, 180);
+    }
+  } catch { /* keep current text */ } finally { tipLoading = false; }
 }
 let coachHistory = [];
 try { coachHistory = JSON.parse(sessionStorage.getItem("snb_coach") || "[]"); } catch { coachHistory = []; }
