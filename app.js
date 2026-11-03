@@ -1472,15 +1472,21 @@ async function profileView() {
         <div class="set-row"><span class="set-t">Holiday themes<span class="muted" style="display:block;font-size:12px">Christmas, Tết and your birthday decorations</span></span>
           <button class="switch" id="seasonOn" aria-label="Holiday themes" aria-pressed="${!seasonOff()}"></button></div>
       </div>
-      <label style="margin-top:14px">Your birthday<input type="date" id="bday" value="${esc(profile.birthday || "")}"></label>
-      <p class="muted">Only used to throw you a little party in the app on the day.</p>`);
+      <div class="set-group" style="margin-top:14px">
+        <label class="bday-row"><span class="set-ic" style="background:var(--tint-purple)">${sv(SEASONS.birthday.icon)}</span>
+          <span class="set-t">Your birthday<span class="muted" style="display:block;font-size:12px" id="bdayTxt">${profile.birthday ? new Date(profile.birthday + "T00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : "Add it for a little party on the day"}</span></span>
+          <span class="bday-edit">${profile.birthday ? "Change" : "Add"}</span>
+          <input type="date" id="bday" value="${esc(profile.birthday || "")}" max="${vnToday()}" aria-label="Your birthday"></label>
+      </div>`);
     s.el.querySelectorAll("[data-theme-pick]").forEach((b) => (b.onclick = () => { applyTheme(b.dataset.themePick); s.close(); route(); }));
     s.el.querySelector("#seasonOn").onclick = (e) => { const on = e.currentTarget.getAttribute("aria-pressed") !== "true"; e.currentTarget.setAttribute("aria-pressed", on); try { localStorage.setItem("snb_season_off", on ? "" : "1"); } catch { /* ignore */ } applySeason(); };
     s.el.querySelector("#bday").onchange = async (e) => {
       const v = e.target.value || null;
       const { error } = await sb.from("profiles").update({ birthday: v }).eq("id", user.id);
       if (error) return fail(error);
-      profile.birthday = v; saveProfile(); toast("Birthday saved"); refreshSeason();
+      profile.birthday = v; saveProfile(); toast(v ? "Birthday saved" : "Birthday removed"); refreshSeason();
+      s.el.querySelector("#bdayTxt").textContent = v ? new Date(v + "T00:00").toLocaleDateString("en-GB", { day: "numeric", month: "long" }) : "Add it for a little party on the day";
+      s.el.querySelector(".bday-edit").textContent = v ? "Change" : "Add";
     };
   };
   $("#rowBadges").onclick = () => { location.hash = "#badges"; };
