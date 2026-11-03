@@ -1370,7 +1370,7 @@ async function profileView() {
 }
 
 // ---------- ADMIN ----------
-let adminTab = "stats";
+let adminTab = "stats", adminMetric = "active";
 async function admin() {
   if (!profile.is_admin) { location.hash = "#home"; return; }
   tabs.querySelectorAll("a").forEach((a) => a.classList.toggle("active", a.dataset.tab === "profile"));
@@ -1380,28 +1380,34 @@ async function admin() {
     const days = await rpc("admin_stats", { days: 14 });
     const users = await rpc("admin_users");
     const sum = (k) => days.reduce((t, d) => t + Number(d[k]), 0);
-    const chart = (key, color, label, fmt = n0) => {
-      const max = Math.max(1, ...days.map((d) => Number(d[key])));
-      const w = 320, h = 90, bw = w / days.length;
-      return `<div class="card stack"><div class="row"><b>${label}</b><span class="muted">14 days · ${fmt(sum(key))}</span></div>
-        <svg viewBox="0 0 ${w} ${h + 16}" width="100%" role="img" aria-label="${label} per day">
-          ${days.map((d, i) => { const v = Number(d[key]); const bh = (v / max) * h;
-            return `<rect x="${i * bw + 2}" y="${h - bh}" width="${bw - 4}" height="${Math.max(bh, v ? 2 : 0)}" rx="3" fill="${color}"><title>${d.day}: ${fmt(v)}</title></rect>`; }).join("")}
-          <text x="0" y="${h + 14}" font-size="10" fill="var(--muted)">${days[0].day.slice(5)}</text>
-          <text x="${w}" y="${h + 14}" font-size="10" fill="var(--muted)" text-anchor="end">${days[days.length - 1].day.slice(5)}</text>
-        </svg></div>`;
-    };
+    const M = [
+      { k: "active", label: "Active users", sub: "today", val: days.length ? days[days.length - 1].active : 0, fmt: n0, tint: "var(--tint-ok)", col: "var(--ok)", icon: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>' },
+      { k: "signups", label: "New sign-ups", sub: `${users.length} users total`, val: sum("signups"), fmt: n0, tint: "var(--tint-snack)", col: "var(--snack)", icon: '<circle cx="10" cy="8" r="4"/><path d="M3 21a7 7 0 0 1 14 0M19 8v6M16 11h6"/>' },
+      { k: "meals", label: "Meals logged", sub: "14 days", val: sum("meals"), fmt: n0, tint: "var(--tint-burn)", col: "var(--burn)", icon: '<path d="M14.5 4h-5L7.5 6.5H4a1 1 0 0 0-1 1V19a1 1 0 0 0 1 1h16a1 1 0 0 0 1-1V7.5a1 1 0 0 0-1-1h-3.5z"/><circle cx="12" cy="13" r="3.5"/>' },
+      { k: "km", label: "Km run", sub: "14 days", val: sum("km"), fmt: n1, tint: "var(--tint-info)", col: "var(--info)", icon: '<path d="M3 16l2-8 4 2 3-1 2 3 6 2a2 2 0 0 1 1 2v1H3zM3 19h18"/>' },
+    ];
+    const cur = M.find((m) => m.k === adminMetric) || M[0];
+    const vals = days.map((d) => Number(d[cur.k]));
+    const max = Math.max(1, ...vals);
+    const W = 336, H = 120, gap = 4, bw = (W - gap * (days.length - 1)) / days.length;
+    const dLbl = (iso) => new Date(iso + "T00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short" });
     body = `
-      <div class="grid g2">
-        <div class="tile" style="background:var(--tint-snack)"><b>${users.length}</b>Total users</div>
-        <div class="tile" style="background:var(--tint-ok)"><b>${days.length ? days[days.length - 1].active : 0}</b>Active today</div>
-        <div class="tile" style="background:var(--tint-burn)"><b>${n0(sum("meals"))}</b>Meals · 14 days</div>
-        <div class="tile" style="background:var(--tint-info)"><b>${n1(sum("km"))}</b>km run · 14 days</div>
+      <div class="kpis" role="tablist" aria-label="Pick a metric">
+        ${M.map((m) => `<button class="kpi ${m === cur ? "on" : ""}" role="tab" aria-selected="${m === cur}" data-metric="${m.k}" style="--kt:${m.tint};--kc:${m.col}">
+          <span class="kpi-ic">${sv(m.icon)}</span><b>${m.fmt(m.val)}</b><span class="kpi-l">${m.label}</span><span class="kpi-s">${m.sub}</span></button>`).join("")}
       </div>
-      ${chart("active", "#1D7A43", "Active users")}
-      ${chart("signups", "#FFB020", "New sign-ups")}
-      ${chart("meals", "#D93A1E", "Meals logged")}
-      ${chart("km", "#2F6FB0", "Km run", n1)}`;
+      <section class="card chart-card" aria-label="${cur.label}, last 14 days">
+        <div class="row"><div><b>${cur.label}</b><div class="muted" style="font-size:13px">Last 14 days · total ${cur.fmt(vals.reduce((t, v) => t + v, 0))}</div></div>
+          <span class="muted" style="font-size:13px">max ${cur.fmt(max)}</span></div>
+        <svg viewBox="0 0 ${W} ${H + 22}" width="100%" role="img" aria-label="${cur.label} per day, ${dLbl(days[0].day)} to ${dLbl(days[days.length - 1].day)}">
+          <line x1="0" x2="${W}" y1="${H}" y2="${H}" style="stroke:var(--border)" />
+          ${days.map((d, i) => { const v = vals[i], x = i * (bw + gap), bh = v ? Math.max(4, (v / max) * (H - 18)) : 0, last = i === days.length - 1;
+            return `<rect x="${x}" y="0" width="${bw}" height="${H}" rx="5" style="fill:var(--line)"/>
+              ${v ? `<rect x="${x}" y="${H - bh}" width="${bw}" height="${bh}" rx="5" style="fill:${cur.col}" opacity="${last ? 1 : 0.8}"><title>${dLbl(d.day)}: ${cur.fmt(v)}</title></rect>
+              <text x="${x + bw / 2}" y="${H - bh - 5}" font-size="10" font-weight="600" text-anchor="middle" style="fill:var(--ink)">${cur.fmt(v)}</text>` : ""}`; }).join("")}
+          ${[0, 7, 13].map((i) => `<text x="${i === 0 ? 0 : i === 13 ? W : i * (bw + gap) + bw / 2}" y="${H + 16}" font-size="10" style="fill:var(--muted)" text-anchor="${i === 0 ? "start" : i === 13 ? "end" : "middle"}">${i === 13 ? "Today" : dLbl(days[i].day)}</text>`).join("")}
+        </svg>
+      </section>`;
   }
 
   if (adminTab === "users") {
@@ -1450,12 +1456,14 @@ async function admin() {
 
   app.innerHTML = `
     <div class="row"><h1>Admin</h1><a class="btn outline small" href="#profile">Done</a></div>
-    <div class="seg" role="group" aria-label="Admin section">
+    <div class="seg admin-tabs" role="group" aria-label="Admin section">
       ${[["stats", "Stats"], ["users", "Users"], ["dishes", "Dishes"], ["events", "Events"], ["themes", "Themes"], ["ai", "AI"]].map(([k, t]) => `<button aria-pressed="${adminTab === k}" data-at="${k}">${t}</button>`).join("")}
     </div>
     ${body}`;
 
   $$("[data-at]").forEach((b) => (b.onclick = () => { adminTab = b.dataset.at; route(); }));
+  $(".admin-tabs [aria-pressed=\"true\"]")?.scrollIntoView({ inline: "center", block: "nearest" });
+  $$("[data-metric]").forEach((b) => (b.onclick = () => { adminMetric = b.dataset.metric; const y = scrollY; route().then(() => scrollTo(0, y)); }));
   const ai = $("#ai");
   if (ai) {
     $$("[data-prov]").forEach((b) => (b.onclick = () => {
