@@ -68,7 +68,7 @@ async function loadDishes(force) {
 }
 
 // ---------- routing ----------
-const VIEWS = { home, snap, challenges, friends, profileView, admin, coach, badges: badgesView };
+const VIEWS = { home, snap, challenges, friends, profileView, admin, coach, badges: badgesView, watch: watchGuide };
 let snapState = null;
 
 function saveProfile() { try { localStorage.setItem("snb_profile", JSON.stringify(profile)); } catch { /* ignore */ } }
@@ -990,89 +990,202 @@ function downscale(file) {
 
 // ---------- CHALLENGES ----------
 let challengeMetric = "km";
+const CROWN = '<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5z"/>';
 async function challenges(q) {
-  const [{ data: list, error }, badges, friendsList] = await Promise.all([
+  const [{ data: list, error }, friendsList] = await Promise.all([
     sb.from("challenges").select("*").gte("ends_at", new Date(Date.now() - 7 * 864e5).toISOString()).order("ends_at"),
-    rpc("my_badges"),
     rpc("friends_week"),
   ]);
   if (error) throw error;
-  const shown = list.filter((c) => c.metric === challengeMetric).sort((a, b) => (b.official ? 1 : 0) - (a.official ? 1 : 0));
+  const now = Date.now();
+  const shown = list.filter((c) => c.metric === challengeMetric)
+    .sort((a, b) => (new Date(a.ends_at) < now) - (new Date(b.ends_at) < now) || (b.official ? 1 : 0) - (a.official ? 1 : 0));
   const boards = await Promise.all(shown.map((c) => rpc("challenge_leaderboard", { cid: c.id })));
-  const bd = badges[0] || { total_km: 0, challenge_wins: 0, streak: 0 };
-  const preselect = q.get("with");
-  const daysLeft = (c) => Math.max(0, Math.ceil((new Date(c.ends_at) - Date.now()) / 864e5));
+  const counts = { km: list.filter((c) => c.metric === "km" && new Date(c.ends_at) > now).length, kcal: list.filter((c) => c.metric === "kcal" && new Date(c.ends_at) > now).length };
+  const unitOf = (c) => (c.metric === "km" ? "km" : "kcal");
+  const fmtOf = (c) => (v) => (c.metric === "km" ? n1(v) : n0(v));
+  const leftTxt = (c) => { const ms = new Date(c.ends_at) - now; if (ms <= 0) return "Finished"; const d = Math.floor(ms / 864e5), h = Math.floor(ms / 36e5) % 24; return d ? `${d}d ${h}h left` : `${h}h left`; };
+  const av = (r, i, cls = "") => `<span class="avatar ${cls}" style="background:${COLORS[i % 5]}">${initial(r.display_name)}</span>`;
+  const nm = (r) => (r.user_id === user.id ? "You" : esc(r.display_name));
+
+  const card = (c, rows) => {
+    const fmt = fmtOf(c), unit = unitOf(c);
+    const st = new Date(c.starts_at).getTime(), en = new Date(c.ends_at).getTime();
+    const ended = en < now, pct = Math.max(0, Math.min(100, ((now - st) / (en - st)) * 100));
+    const me = rows.findIndex((r) => r.user_id === user.id), lead = rows[0], top = Math.max(1, lead?.score || 0);
+    const status = me < 0 ? `${rows.length} taking part`
+      : ended ? (me === 0 ? "You won this one!" : `You finished #${me + 1}`)
+      : me === 0 ? (rows[1] ? `You lead by ${fmt(lead.score - rows[1].score)} ${unit}` : "You’re leading. Keep it up!")
+      : `${fmt(lead.score - rows[me].score)} ${unit} to take the lead`;
+    const pod = rows.slice(0, 3);
+    const order = [1, 0, 2].filter((i) => pod[i]);
+    return `<article class="ch-card ${c.official ? "official" : ""} ${ended ? "ended" : ""}">
+      <header class="ch-head">
+        <div class="ch-tags"><span class="ch-tag">${c.official ? `${sv(CROWN)} Official event` : (en - st) / 864e5 <= 7.01 ? "Weekly" : "Custom"}</span>
+          <span class="ch-tag ${ended ? "" : "live"}">${ended ? "" : '<i class="pulse"></i>'}${leftTxt(c)}</span></div>
+        <h2>${esc(c.name)}</h2>
+        <p class="ch-status">${me >= 0 ? `<b>#${me + 1}</b> · ` : ""}${status}</p>
+        <div class="ch-time" role="img" aria-label="${Math.round(pct)}% of the time has passed"><span style="width:${pct}%"></span></div>
+      </header>
+      ${rows.length ? `<div class="podium">${order.map((i) => `
+        <div class="pod p${i + 1} ${pod[i].user_id === user.id ? "me" : ""}">
+          ${i === 0 ? `<span class="pod-crown">${sv(CROWN)}</span>` : ""}
+          ${av(pod[i], i, "pod-av")}
+          <span class="pod-name">${nm(pod[i])}</span>
+          <span class="pod-score">${fmt(pod[i].score)} <small>${unit}</small></span>
+          <span class="pod-step"><b>${i + 1}</b></span>
+        </div>`).join("")}</div>` : `<p class="muted center" style="padding:12px">Nobody has scored yet. Be first!</p>`}
+      ${rows.length > 3 ? `<ol class="ch-rest" start="4">${rows.slice(3, 10).map((r, j) => `
+        <li class="${r.user_id === user.id ? "me" : ""}"><span class="rk">${j + 4}</span>${av(r, j + 3)}<span class="nm">${nm(r)}</span>
+          <span class="bar"><span style="width:${(r.score / top) * 100}%"></span></span><b>${fmt(r.score)}</b></li>`).join("")}</ol>` : ""}
+      ${me > 9 ? `<p class="muted center">You: #${me + 1} · ${fmt(rows[me].score)} ${unit}</p>` : ""}
+      ${me < 0 && c.official && !ended ? `<button class="primary block" data-join="${c.id}">Join event</button>` : ""}
+    </article>`;
+  };
 
   app.innerHTML = `
-    <div class="row"><h1>Challenges</h1><button class="primary small" id="new">+ New</button></div>
-    <div class="seg" role="group" aria-label="Challenge type">
-      <button aria-pressed="${challengeMetric === "km"}" data-m="km">Most km run</button>
-      <button aria-pressed="${challengeMetric === "kcal"}" data-m="kcal">Most kcal burned</button>
+    <div class="row"><h1>Challenges</h1><button class="primary small" id="new">${sv('<path d="M12 5v14M5 12h14"/>')} New</button></div>
+    <div class="seg ch-seg" role="group" aria-label="Challenge type">
+      <button aria-pressed="${challengeMetric === "km"}" data-m="km">${sv('<path d="M3 16l2-8 4 2 3-1 2 3 6 2a2 2 0 0 1 1 2v1H3zM3 19h18"/>')} Km run${counts.km ? ` <span class="cnt">${counts.km}</span>` : ""}</button>
+      <button aria-pressed="${challengeMetric === "kcal"}" data-m="kcal">${sv('<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3 0-3 0-5 1-8.5z"/>')} Kcal burned${counts.kcal ? ` <span class="cnt">${counts.kcal}</span>` : ""}</button>
     </div>
-
-    <form id="create" class="card stack" ${preselect ? "" : "hidden"}>
-      <label>Challenge name<input name="name" required maxlength="60" placeholder="Saigon Sunday Runners"></label>
-      <div class="grid g2">
-        <label>Type<select name="metric"><option value="km" ${challengeMetric === "km" ? "selected" : ""}>Most km run</option><option value="kcal" ${challengeMetric === "kcal" ? "selected" : ""}>Most kcal burned</option></select></label>
-        <label>Length<select name="len"><option value="week">Weekly (7 days)</option><option value="custom">Custom</option></select></label>
-      </div>
-      <div class="grid g2" id="custom" hidden>
-        <label>Starts<input name="start" type="date"></label>
-        <label>Ends<input name="end" type="date"></label>
-      </div>
-      <fieldset style="border:0;padding:0;margin:0" class="stack">
-        <legend class="muted" style="margin-bottom:6px">Invite friends</legend>
-        ${friendsList.length ? friendsList.map((f) => `<label style="flex-direction:row;align-items:center;color:var(--ink);font-size:15px"><input type="checkbox" name="m" value="${f.id}" style="width:22px;min-height:22px" ${f.id === preselect ? "checked" : ""}> ${esc(f.display_name)}</label>`).join("")
-          : `<p class="muted">Add friends first on the Friends tab.</p>`}
-      </fieldset>
-      <button class="primary block">Start challenge</button>
-    </form>
-
-    ${shown.length ? shown.map((c, i) => {
-      const rows = boards[i]; const meIdx = rows.findIndex((r) => r.user_id === user.id);
-      const unit = c.metric === "km" ? "km" : "kcal";
-      const fmt = (v) => (c.metric === "km" ? n1(v) : n0(v));
-      const lead = rows[0]; const ended = new Date(c.ends_at) < new Date();
-      const gap = meIdx > 0 ? `${fmt(lead.score - rows[meIdx].score)} ${unit} to take the lead.` : meIdx === 0 ? "You’re leading. Keep it up!" : "";
-      return `
-      <section class="hero" style="gap:4px">
-        <span class="muted">${c.official ? "Official event" : (new Date(c.ends_at) - new Date(c.starts_at)) / 864e5 === 7 ? "Weekly" : "Custom"} · ${ended ? "finished" : `ends in ${daysLeft(c)} day${daysLeft(c) === 1 ? "" : "s"}`}</span>
-        <span class="display" style="font-size:24px;font-weight:500">${esc(c.name)}</span>
-        <span class="muted">${meIdx >= 0 ? `You’re #${meIdx + 1}. ` : ""}${gap}${meIdx < 0 ? `${rows.length} taking part.` : ""}</span>
-        ${meIdx < 0 && c.official && !ended ? `<button class="primary" style="margin-top:8px" data-join="${c.id}">Join event</button>` : ""}
-      </section>
-      <div class="list">${rows.slice(0, 10).map((r, j) => `
-        <div class="row" style="${r.user_id === user.id ? "font-weight:700" : ""}">
-          <div class="row" style="justify-content:flex-start"><span class="display" style="width:24px;color:var(--muted)">${j + 1}</span><span class="avatar" style="background:${COLORS[j % 5]}">${initial(r.display_name)}</span>${r.user_id === user.id ? "You" : esc(r.display_name)}</div>
-          <b>${fmt(r.score)} ${unit}</b></div>`).join("")}</div>`;
-    }).join("") : `<div class="card"><p>No ${challengeMetric === "km" ? "km" : "kcal"} challenges yet.</p><p class="muted">Tap + New and pick some friends.</p></div>`}
-
+    ${shown.length ? shown.map((c, i) => card(c, boards[i])).join("") : `
+      <div class="ch-empty">
+        <span class="ch-empty-ic">${sv(challengeMetric === "km" ? '<path d="M3 16l2-8 4 2 3-1 2 3 6 2a2 2 0 0 1 1 2v1H3zM3 19h18"/>' : '<path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3 0-3 0-5 1-8.5z"/>')}</span>
+        <b>No ${challengeMetric === "km" ? "running" : "calorie"} challenges yet</b>
+        <p class="muted">Pick a few friends and race for a week. Losers buy the bánh mì.</p>
+        <button class="primary" id="new2">Start a challenge</button>
+      </div>`}
     <div class="row"><h2>Your badges</h2><a class="btn outline small" href="#badges">See all</a></div>
     <div class="badge-grid" id="chBadges"><div class="skel" style="height:96px;grid-column:1/-1"></div></div>`;
-  rpc("my_badge_list").then((list) => { const el = $("#chBadges"); if (el) el.innerHTML = list.slice(0, 8).map(badgeTile).join(""); wireBadgeTiles(list); }).catch(() => {});
+  rpc("my_badge_list").then((l) => { const el = $("#chBadges"); if (el) el.innerHTML = l.slice(0, 8).map(badgeTile).join(""); wireBadgeTiles(l); }).catch(() => {});
 
   $$("[data-m]").forEach((b) => (b.onclick = () => { challengeMetric = b.dataset.m; route(); }));
   $$("[data-join]").forEach((b) => (b.onclick = async () => {
     try { await rpc("join_challenge", { cid: b.dataset.join }); toast("You're in! Go get it."); route(); } catch (e) { fail(e); }
   }));
-  const f = $("#create");
-  $("#new").onclick = () => { f.hidden = !f.hidden; };
-  f.len.onchange = () => { $("#custom").hidden = f.len.value !== "custom"; };
-  f.onsubmit = async (e) => {
-    e.preventDefault();
-    let starts = new Date(); let ends = new Date(Date.now() + 7 * 864e5);
-    if (f.len.value === "custom") {
-      if (!f.start.value || !f.end.value) return toast("Pick start and end dates");
-      starts = new Date(f.start.value + "T00:00"); ends = new Date(f.end.value + "T23:59");
-      if (ends <= starts) return toast("End date must be after start");
-    }
-    const members = $$('input[name="m"]:checked').map((i) => i.value);
+  const open = () => newChallengeSheet(friendsList, q.get("with"));
+  $("#new").onclick = open; const n2 = $("#new2"); if (n2) n2.onclick = open;
+  if (q.get("with")) { history.replaceState(null, "", "#challenges"); open(); }
+}
+
+function newChallengeSheet(friendsList, preselect) {
+  let metric = challengeMetric, len = 7;
+  const picked = new Set(preselect ? [preselect] : []);
+  const s = openSheet("New challenge", `
+    <label>Name<input id="cName" maxlength="60" placeholder="Saigon Sunday Runners"></label>
+    <div class="seg" role="radiogroup" aria-label="Type">
+      <button type="button" data-cm="km" aria-pressed="${metric === "km"}">Most km run</button>
+      <button type="button" data-cm="kcal" aria-pressed="${metric === "kcal"}">Most kcal burned</button>
+    </div>
+    <div><p class="muted" style="margin:0 0 6px">How long</p><div class="chips">
+      ${[[3, "3 days"], [7, "1 week"], [14, "2 weeks"], [30, "1 month"]].map(([d, t]) => `<button type="button" class="chip" data-cl="${d}" aria-pressed="${d === 7}">${t}</button>`).join("")}
+    </div></div>
+    <div><p class="muted" style="margin:0 0 6px">Invite friends <span id="pCount"></span></p>
+      ${friendsList.length ? `<div class="friend-pick">${friendsList.map((f, i) => `
+        <button type="button" class="fp" data-fp="${f.id}" aria-pressed="${picked.has(f.id)}"><span class="avatar" style="background:${COLORS[i % 5]}">${initial(f.display_name)}</span><span>${esc(f.display_name)}</span><i>${sv('<path d="M5 12l5 5 9-10"/>')}</i></button>`).join("")}</div>`
+        : `<p class="muted">Add friends first on the Friends tab.</p>`}
+    </div>
+    <button class="primary block" id="cGo">Start challenge</button>`);
+  const E = s.el;
+  const cnt = () => { E.querySelector("#pCount").textContent = picked.size ? `· ${picked.size} picked` : ""; };
+  cnt();
+  E.querySelectorAll("[data-cm]").forEach((b) => (b.onclick = () => { metric = b.dataset.cm; E.querySelectorAll("[data-cm]").forEach((x) => x.setAttribute("aria-pressed", x === b)); }));
+  E.querySelectorAll("[data-cl]").forEach((b) => (b.onclick = () => { len = +b.dataset.cl; E.querySelectorAll("[data-cl]").forEach((x) => x.setAttribute("aria-pressed", x === b)); }));
+  E.querySelectorAll("[data-fp]").forEach((b) => (b.onclick = () => { const id = b.dataset.fp; picked.has(id) ? picked.delete(id) : picked.add(id); b.setAttribute("aria-pressed", picked.has(id)); cnt(); }));
+  E.querySelector("#cGo").onclick = async () => {
+    const name = E.querySelector("#cName").value.trim();
+    if (!name) return toast("Give your challenge a name");
+    if (!picked.size) return toast("Pick at least one friend");
+    const starts = new Date(), ends = new Date(Date.now() + len * 864e5);
     try {
-      await rpc("create_challenge", { p_name: f.name.value.trim(), p_metric: f.metric.value, p_starts: starts.toISOString(), p_ends: ends.toISOString(), p_members: members });
-      challengeMetric = f.metric.value; toast("Challenge on! May the fastest snacker win.");
-      location.hash = "#challenges"; route();
+      await rpc("create_challenge", { p_name: name, p_metric: metric, p_starts: starts.toISOString(), p_ends: ends.toISOString(), p_members: [...picked] });
+      challengeMetric = metric; s.close(); toast("Challenge on! May the fastest snacker win."); route();
     } catch (err) { fail(err); }
   };
+}
+
+// ---------- APPLE WATCH + HEALTH GUIDE (interactive) ----------
+let watchStep = 0;
+const WATCH_DONE_KEY = "snb_watch_done";
+const watchDone = () => { try { return JSON.parse(localStorage.getItem(WATCH_DONE_KEY) || "[]"); } catch { return []; } };
+async function watchGuide() {
+  tabs.querySelectorAll("a").forEach((a) => a.classList.toggle("active", a.dataset.tab === "profile"));
+  const [code, tok] = await Promise.all([rpc("my_step_token", { regenerate: false }).catch(() => ""), sb.from("step_tokens").select("last_sync").maybeSingle()]);
+  const url = `${cfg.SUPABASE_URL}/functions/v1/sync-steps`;
+  const lastSync = tok.data?.last_sync;
+  const path = (items) => `<div class="g-path">${items.map((t, i) => `${i ? `<span class="g-sep">›</span>` : ""}<span class="g-crumb">${t}</span>`).join("")}</div>`;
+  const STEPS = [
+    { t: "Đeo Apple Watch là đủ", short: "Watch → Health",
+      art: `<div class="g-flow"><div class="g-watch"><div class="g-watch-face"><b>8,240</b><span>bước</span></div></div><div class="g-dots"><i></i><i></i><i></i></div><div class="g-health">${sv('<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>')}</div><div class="g-dots"><i></i><i></i><i></i></div><div class="g-app"><img src="icon-192.png" alt=""></div></div>`,
+      body: `<p>Apple Watch tự gửi bước chân và bài tập vào app <b>Sức khỏe</b> (Health) trên iPhone. Snack &amp; Burn đọc số bước từ đó.</p>
+        <p class="muted">Kiểm tra: mở <b>Sức khỏe</b>, rồi vào:</p>${path(["Duyệt", "Hoạt động", "Bước", "Nguồn dữ liệu & Truy cập"])}
+        <p class="muted">Thấy tên Apple Watch là được. Bấm <b>Sửa</b> và kéo Watch lên đầu để số bước chính xác nhất.</p>` },
+    { t: "Bật theo dõi thể chất", short: "Fitness Tracking",
+      art: `<div class="g-phone"><div class="g-screen"><div class="g-nav">Chuyển động &amp; thể chất</div><button class="g-toggle-row" id="gToggle" aria-pressed="false"><span>Theo dõi thể chất</span><span class="switch" aria-hidden="true"></span></button><p class="g-hint">Thử chạm công tắc</p></div></div>`,
+      body: `<p>Để iPhone và Watch được đếm bước, mở <b>Cài đặt</b>:</p>${path(["Quyền riêng tư & Bảo mật", "Chuyển động & thể chất"])}
+        <p>Bật <b>Theo dõi thể chất</b> và bật cho <b>Sức khỏe</b>.</p>` },
+    { t: "Tạo phím tắt đồng bộ", short: "Shortcut",
+      art: `<div class="g-blocks">
+        <button class="g-block b1" data-gb="1"><span class="gb-ic">${sv('<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>')}</span><span><b>Tìm mẫu sức khỏe</b><small>Loại: Bước · Ngày bắt đầu: Hôm nay · Nhóm theo: Ngày</small></span></button>
+        <button class="g-block b2" data-gb="2"><span class="gb-ic">${sv('<path d="M4 20h16M7 16V9M12 16V5M17 16v-4"/>')}</span><span><b>Tính toán thống kê</b><small>Tổng của Mẫu sức khỏe</small></span></button>
+        <button class="g-block b3" data-gb="3"><span class="gb-ic">${sv('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>')}</span><span><b>Nhận nội dung của URL</b><small>POST · JSON: code, steps</small></span></button></div>`,
+      body: `<p>Mở app <b>Phím tắt</b> (Shortcuts), bấm <b>+</b> và thêm đúng 3 khối như hình. Chạm từng khối để xem cách điền.</p>
+        <div class="g-detail" id="gDetail"><p class="muted">Chạm một khối ở trên.</p></div>
+        <div class="grid g2"><button class="outline small" data-copy="${esc(url)}">${sv('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>')} Địa chỉ web</button><button class="outline small" data-copy="${esc(code)}">${sv('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>')} Mã đồng bộ</button></div>
+        <p class="muted" style="font-size:13px">Mã đồng bộ là của riêng bạn, đừng gửi cho ai.</p>
+        <label>Tên phím tắt của bạn<input id="scName2" value="${esc(stepShortcutName())}" autocapitalize="off"></label>` },
+    { t: "Cho phép đọc Sức khỏe", short: "Allow Health",
+      art: `<div class="g-phone"><div class="g-screen g-dim"><div class="g-alert"><b>“${esc(stepShortcutName())}” muốn truy cập dữ liệu Sức khỏe</b><span>Bước</span><button class="g-allow" id="gAllow">Cho phép</button><button class="g-deny" tabindex="-1">Không cho phép</button></div></div></div>`,
+      body: `<p>Bấm ▶ để chạy phím tắt lần đầu. iPhone sẽ hỏi quyền: chọn <b>Cho phép</b> cho <b>Bước</b>.</p>
+        <p class="muted">Lỡ bấm từ chối? Vào <b>Sức khỏe</b> › ảnh đại diện › <b>Ứng dụng</b> › <b>Phím tắt</b> và bật lại Bước.</p>` },
+    { t: "Tự động mỗi ngày", short: "Automation",
+      art: `<div class="g-clocks"><div class="g-clock"><span class="hand h12"></span><b>12:00</b></div><div class="g-clock"><span class="hand h20"></span><b>20:00</b></div></div>`,
+      body: `<p>Trong <b>Phím tắt</b>, mở tab <b>Tự động hóa</b> › <b>+</b> › <b>Thời gian trong ngày</b>.</p>
+        <p>Chọn <b>12:00</b>, <b>Hằng ngày</b>, <b>Chạy ngay lập tức</b>, rồi chọn phím tắt vừa tạo. Làm thêm một cái lúc <b>20:00</b>.</p>
+        <p class="muted">Thế là số bước tự về, bạn không cần làm gì nữa.</p>` },
+    { t: "Thử ngay", short: "Test",
+      art: `<div class="g-result ${lastSync ? "ok" : ""}"><span class="g-res-ic">${sv(lastSync ? '<path d="M5 12l5 5 9-10"/>' : '<path d="M12 3v12M7 10l5 5 5-5M5 20h14"/>')}</span><b>${lastSync ? "Đã kết nối!" : "Chưa có dữ liệu"}</b><span>${lastSync ? `Lần cuối: ${new Date(lastSync).toLocaleString("vi-VN", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" })}` : "Bấm nút dưới để chạy thử"}</span></div>`,
+      body: `<p>Bấm <b>Đồng bộ ngay</b>. iPhone mở Phím tắt, chạy xong thì bấm <b>◀ Snack &amp; Burn</b> ở góc trên bên trái để quay lại.</p>
+        <button class="primary block" id="gRun">${sv('<path d="M7 4v16l13-8z"/>')} Đồng bộ ngay</button>
+        <a class="btn outline block" href="#home">Xem số bước ở Home</a>` },
+  ];
+  const done = new Set(watchDone());
+  const i = Math.max(0, Math.min(STEPS.length - 1, watchStep)), S = STEPS[i];
+  app.innerHTML = `
+    <div class="row"><a class="icon-btn" href="#profile" aria-label="Back">${sv('<path d="M15 6l-6 6 6 6"/>')}</a><h1 style="flex:1;font-size:24px">Apple Watch &amp; Health</h1></div>
+    <ol class="g-steps" aria-label="Steps">${STEPS.map((x, k) => `<li><button data-go="${k}" class="${k === i ? "cur" : ""} ${done.has(k) ? "done" : ""}" aria-current="${k === i ? "step" : "false"}" aria-label="Step ${k + 1}: ${x.short}">${done.has(k) && k !== i ? sv('<path d="M5 12l5 5 9-10"/>') : k + 1}</button></li>`).join("")}</ol>
+    <section class="g-card" id="gCard">
+      <div class="g-art">${S.art}</div>
+      <div class="g-body"><p class="g-kicker">Bước ${i + 1} / ${STEPS.length}</p><h2>${S.t}</h2>${S.body}</div>
+    </section>
+    <div class="g-nav-btns">
+      <button class="outline" id="gBack" ${i ? "" : "disabled"}>Quay lại</button>
+      <button class="primary" id="gNext">${i === STEPS.length - 1 ? "Xong" : "Đã làm, tiếp"}</button>
+    </div>`;
+  const go = (k) => { watchStep = k; watchGuide(); window.scrollTo(0, 0); };
+  $$("[data-go]").forEach((b) => (b.onclick = () => go(+b.dataset.go)));
+  $("#gBack").onclick = () => go(i - 1);
+  $("#gNext").onclick = () => {
+    done.add(i); try { localStorage.setItem(WATCH_DONE_KEY, JSON.stringify([...done])); } catch { /* ignore */ }
+    if (i === STEPS.length - 1) { toast("Xong! Số bước sẽ tự về mỗi ngày."); location.hash = "#home"; } else go(i + 1);
+  };
+  // swipe left/right between steps
+  let x0 = null; const card = $("#gCard");
+  card.addEventListener("touchstart", (e) => { x0 = e.touches[0].clientX; }, { passive: true });
+  card.addEventListener("touchend", (e) => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 60) { if (dx < 0 && i < STEPS.length - 1) go(i + 1); if (dx > 0 && i) go(i - 1); } });
+  // step-specific interactions
+  const tg = $("#gToggle"); if (tg) tg.onclick = () => { const on = tg.getAttribute("aria-pressed") !== "true"; tg.setAttribute("aria-pressed", on); tg.querySelector(".switch").setAttribute("aria-pressed", on); $(".g-hint").textContent = on ? "Chuẩn rồi! Làm y vậy trong Cài đặt." : "Thử chạm công tắc"; navigator.vibrate?.(10); };
+  const DETAIL = {
+    1: `<b>Tìm mẫu sức khỏe</b><ul><li>Loại: <b>Bước</b></li><li>Thêm bộ lọc: <b>Ngày bắt đầu</b> là <b>Hôm nay</b></li><li>Nhóm theo: <b>Ngày</b> (để Watch và iPhone không bị cộng trùng)</li></ul>`,
+    2: `<b>Tính toán thống kê</b><ul><li>Chọn <b>Tổng</b></li><li>Đầu vào: <b>Mẫu sức khỏe</b> từ khối trên</li></ul>`,
+    3: `<b>Nhận nội dung của URL</b><ul><li>URL: dán <b>Địa chỉ web</b></li><li>Phương thức: <b>POST</b></li><li>Nội dung yêu cầu: <b>JSON</b></li><li>Thêm trường <span class="kbd">code</span> = dán <b>Mã đồng bộ</b></li><li>Thêm trường <span class="kbd">steps</span> (Số) = <b>Thống kê</b></li></ul>`,
+  };
+  $$("[data-gb]").forEach((b) => (b.onclick = () => { $$("[data-gb]").forEach((x) => x.classList.toggle("on", x === b)); $("#gDetail").innerHTML = DETAIL[b.dataset.gb]; }));
+  $$("[data-copy]").forEach((b) => (b.onclick = async () => { await navigator.clipboard.writeText(b.dataset.copy); toast("Đã sao chép"); }));
+  const sc = $("#scName2"); if (sc) sc.onchange = (e) => { try { localStorage.setItem("snb_shortcut", e.target.value.trim()); } catch { /* ignore */ } toast("Đã lưu"); };
+  const al = $("#gAllow"); if (al) al.onclick = () => { $(".g-alert").innerHTML = `<span class="g-res-ic ok">${sv('<path d="M5 12l5 5 9-10"/>')}</span><b>Đã cho phép</b><span>Phím tắt giờ đọc được số bước.</span>`; navigator.vibrate?.(10); };
+  const run = $("#gRun"); if (run) run.onclick = () => { if (!isIOS()) return toast("Mở Snack & Burn trên iPhone để đồng bộ"); runStepShortcut(); };
 }
 
 // ---------- FRIENDS ----------
@@ -1186,6 +1299,7 @@ const ICON = {
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   chev: '<path d="M9 6l6 6-6 6"/>',
+  watch: '<rect x="6" y="6" width="12" height="12" rx="3"/><path d="M9 6l1-3h4l1 3M9 18l1 3h4l1-3M12 10v2l1.5 1"/>',
   share: '<path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
 };
 const ic = (k, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
@@ -1201,6 +1315,7 @@ function openSheet(title, html) {
   const prev = document.activeElement;
   const close = () => { wrap.remove(); prev?.focus?.(); };
   wrap.querySelector("[data-close]").onclick = close;
+  wrap.querySelectorAll('a[href^="#"]').forEach((a) => a.addEventListener("click", () => wrap.remove()));
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
   wrap.querySelector("[data-close]").focus();
@@ -1245,6 +1360,7 @@ async function profileView() {
 
     <h2 class="set-h">Tracking</h2>
     <div class="set-group">
+      ${row("rowWatch", "watch", "var(--tint-ok)", "Apple Watch &amp; Health", "Guide")}
       ${row("rowSteps", "steps", "var(--tint-burn)", "Step sync", lastSync ? `<span class="ok">Connected</span>` : "Set up")}
     </div>
 
@@ -1315,6 +1431,7 @@ async function profileView() {
   if (location.hash.includes("setpw=1")) { history.replaceState(null, "", "#profile"); openPw(); }
 
   // step sync sheet
+  $("#rowWatch").onclick = () => { watchStep = 0; location.hash = "#watch"; };
   $("#rowSteps").onclick = async () => {
     let code;
     try { code = await rpc("my_step_token", { regenerate: false }); } catch (e) { return fail(e); }
@@ -1323,6 +1440,7 @@ async function profileView() {
       <div class="card stack">
         <div class="row"><b>Status</b>${lastSync ? `<span class="ok">Connected · ${new Date(lastSync).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</span>` : `<span class="muted">Not set up yet</span>`}</div>
         <p class="muted">An Apple Shortcut reads today’s steps from Apple Health (incl. Apple Watch and Garmin) and sends them here. Tap <b>Sync</b> on Home to run it.</p>
+        <a class="btn primary block" href="#watch" data-close-sheet>Step-by-step guide</a>
       </div>
       <div class="step"><span class="num">1</span><div>Copy your two values (keep the code private):
         <div class="grid g2" style="margin-top:8px">
