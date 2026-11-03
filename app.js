@@ -829,10 +829,12 @@ async function snap() {
         <datalist id="dishes">${(await loadDishes()).map(([d]) => `<option value="${esc(d)}">`).join("")}</datalist>
         <div class="row"><label style="flex:1">kcal (medium portion)<input id="addKcal" type="number" inputmode="numeric" min="0" placeholder="Leave empty, AI will estimate"></label><button type="submit" class="primary small" id="addBtn" style="align-self:flex-end">Add</button></div>
       </form>
-      <div class="row"><span>Meal total</span><b>${n0(total)} kcal</b></div>
       <p class="muted">AI estimate, ±20%${s.provider ? ` · read by ${s.provider === "claude" ? "Claude" : "Gemini"}` : ""}</p>
-      <button class="primary block" id="calc" ${s.items.length ? "" : "disabled"}>Calculate my burn</button>
-      <button class="outline block" id="retake">Start over</button>`;
+      <button class="outline block" id="retake">Start over</button>
+      <div class="save-bar" ${s.items.length ? "" : "hidden"}>
+        <div><span class="muted">${s.items.length} item${s.items.length === 1 ? "" : "s"}</span><b>${n0(total)} kcal</b></div>
+        <button class="primary" id="calc">Save meal</button>
+      </div>`;
     $$("[data-z]").forEach((b) => (b.onclick = () => { s.items[b.dataset.i].size = b.dataset.z; route(); }));
     $$("[data-rm]").forEach((b) => (b.onclick = () => { s.items.splice(+b.dataset.rm, 1); route(); }));
     const add = $("#add"), nameIn = $("#addName"), kcalIn = $("#addKcal");
