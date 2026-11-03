@@ -1343,13 +1343,13 @@ async function profileView() {
       .map(([v, t, d]) => `<button class="set-row" data-theme-pick="${v}" role="radio" aria-checked="${cur === v}"><span class="set-t">${t}<span class="muted" style="display:block;font-size:12px">${d}</span></span>${cur === v ? `<span class="ok">${sv('<path d="M5 12l5 5 9-10"/>')}</span>` : ""}</button>`).join("")}</div>`);
     s.el.insertAdjacentHTML("beforeend", `
       <div class="set-group" style="margin-top:14px">
-        <label class="set-row"><span class="set-t">Holiday themes<span class="muted" style="display:block;font-size:12px">Christmas, Tết and your birthday decorations</span></span>
-          <input type="checkbox" role="switch" id="seasonOn" ${seasonOff() ? "" : "checked"}></label>
+        <div class="set-row"><span class="set-t">Holiday themes<span class="muted" style="display:block;font-size:12px">Christmas, Tết and your birthday decorations</span></span>
+          <button class="switch" id="seasonOn" aria-label="Holiday themes" aria-pressed="${!seasonOff()}"></button></div>
       </div>
       <label style="margin-top:14px">Your birthday<input type="date" id="bday" value="${esc(profile.birthday || "")}"></label>
       <p class="muted">Only used to throw you a little party in the app on the day.</p>`);
     s.el.querySelectorAll("[data-theme-pick]").forEach((b) => (b.onclick = () => { applyTheme(b.dataset.themePick); s.close(); route(); }));
-    s.el.querySelector("#seasonOn").onchange = (e) => { try { localStorage.setItem("snb_season_off", e.target.checked ? "" : "1"); } catch { /* ignore */ } applySeason(); };
+    s.el.querySelector("#seasonOn").onclick = (e) => { const on = e.currentTarget.getAttribute("aria-pressed") !== "true"; e.currentTarget.setAttribute("aria-pressed", on); try { localStorage.setItem("snb_season_off", on ? "" : "1"); } catch { /* ignore */ } applySeason(); };
     s.el.querySelector("#bday").onchange = async (e) => {
       const v = e.target.value || null;
       const { error } = await sb.from("profiles").update({ birthday: v }).eq("id", user.id);
@@ -1687,7 +1687,7 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => ap
 // "birthday" turns on birthday parties in the period, shown to each user on their own birthday.
 const SEASONS = {
   christmas: { name: "Christmas", vi: "Giáng sinh", banner: "Giáng sinh vui vẻ! Ăn bánh khúc cây xong nhớ đi bộ nha.",
-    icon: '<path d="M12 2l3 5h-2l3 5h-2l3 5H7l3-5H8l3-5H9z"/><path d="M12 17v4"/>' },
+    icon: '<path d="M12 3l4 5.5h-2.2L17.5 13h-2.3L19 18H5l3.8-5H6.5l3.7-4.5H8z"/><path d="M12 18v3M10 21h4"/>' },
   tet: { name: "Lunar New Year", vi: "Tết", banner: "Chúc mừng năm mới! Bánh chưng nhiều kcal lắm, đi chúc Tết bằng chân nhé.",
     icon: '<path d="M12 4c2 3 2 5 0 8-2-3-2-5 0-8zM4 12c3-2 5-2 8 0-3 2-5 2-8 0zM20 12c-3-2-5-2-8 0 3 2 5 2 8 0zM12 20c-2-3-2-5 0-8 2 3 2 5 0 8z"/><circle cx="12" cy="12" r="1.5"/>' },
   birthday: { name: "Birthday", vi: "Sinh nhật", banner: null,
@@ -1733,30 +1733,70 @@ async function adminThemesBody() {
   if (error) throw error;
   const day = vnToday();
   const fmtD = (d) => new Date(d + "T00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const forever = (r) => r.ends_on >= "2099-01-01";
+  const span = (r) => forever(r) ? `From ${fmtD(r.starts_on)} · until turned off` : `${fmtD(r.starts_on)} – ${fmtD(r.ends_on)}`;
+  const live = (k) => data.find((r) => r.theme === k && r.starts_on <= day && r.ends_on >= day);
   return `
-    <div class="row"><span class="muted">Holiday looks switch on by themselves in the dates you set (Vietnam time).</span></div>
-    <div class="theme-picks">${Object.entries(SEASONS).map(([k, S]) => `
-      <button class="theme-pick tp-${k}" data-new-theme="${k}"><span class="sb-ic">${sv(S.icon)}</span><b>${S.name}</b><span>${k === "birthday" ? "Each user, on their birthday" : "Everyone"}</span><span class="tp-add">+ Schedule</span></button>`).join("")}</div>
-    ${data.length ? `<div class="list">${data.map((r) => {
+    <p class="muted">Turn a look on now, or schedule dates and it switches on and off by itself (Vietnam time).</p>
+    <div class="stack" style="gap:10px">${Object.entries(SEASONS).map(([k, S]) => { const L = live(k); return `
+      <div class="card theme-card tp-${k}">
+        <div class="row" style="gap:12px">
+          <span class="sb-ic">${sv(S.icon)}</span>
+          <div style="flex:1;min-width:0"><b>${S.name}</b><div class="muted" style="font-size:13px">${L ? `<span class="live-dot"></span>On · ${forever(L) ? "until you turn it off" : `until ${fmtD(L.ends_on)}`}` : k === "birthday" ? "Each user, on their own birthday" : "Everyone in the app"}</div></div>
+          <button class="switch" data-toggle-theme="${k}" aria-pressed="${!!L}" aria-label="${S.name} on now"></button>
+        </div>
+        <button class="link-btn" data-new-theme="${k}">${sv('<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>')} Schedule dates</button>
+      </div>`; }).join("")}</div>
+    ${data.length ? `<h3 style="margin-top:8px">Schedule</h3><div class="list">${data.map((r) => {
       const st = day < r.starts_on ? "Upcoming" : day > r.ends_on ? "Ended" : "Live";
-      return `<div class="row"><div class="row" style="justify-content:flex-start"><span class="sb-ic tp-${r.theme}">${sv(SEASONS[r.theme].icon)}</span>
-        <div><b>${SEASONS[r.theme].name}</b><div class="muted">${fmtD(r.starts_on)} – ${fmtD(r.ends_on)}</div></div></div>
-        <div class="row" style="gap:8px"><span class="ev-chip ${st.toLowerCase()}">${st === "Live" ? "● " : ""}${st}</span><button class="outline small danger" data-del-theme="${r.id}" aria-label="Delete ${SEASONS[r.theme].name} period">Delete</button></div></div>`;
-    }).join("")}</div>` : `<div class="card center"><p class="muted">No holiday periods yet. Pick a theme above to schedule one.</p></div>`}`;
+      return `<div class="row"><div class="row" style="justify-content:flex-start;gap:12px;min-width:0"><span class="sb-ic sm tp-${r.theme}">${sv(SEASONS[r.theme].icon)}</span>
+        <div style="min-width:0"><b>${SEASONS[r.theme].name}</b> <span class="ev-chip ${st.toLowerCase()}">${st}</span><div class="muted" style="font-size:13px">${span(r)}</div></div></div>
+        <button class="icon-btn" data-del-theme="${r.id}" aria-label="Delete ${SEASONS[r.theme].name} period">${sv('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>')}</button></div>`;
+    }).join("")}</div>` : ""}`;
 }
 function wireAdminThemes() {
-  const year = +vnToday().slice(0, 4);
-  const DEFAULTS = { christmas: [`${year}-12-15`, `${year}-12-26`], tet: [`${year + 1}-02-10`, `${year + 1}-02-22`], birthday: [vnToday(), `${year}-12-31`] };
+  const day = vnToday(), year = +day.slice(0, 4);
+  const addDays = (d, n) => { const x = new Date(d + "T00:00Z"); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const DEFAULTS = { christmas: [`${year}-12-15`, `${year}-12-26`], tet: ["2027-02-01", "2027-02-14"], birthday: [day, `${year}-12-31`] };
+  const nice = (d) => d ? new Date(d + "T00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" }) : "Pick a date";
+  $$("[data-toggle-theme]").forEach((b) => (b.onclick = async () => {
+    const k = b.dataset.toggleTheme, on = b.getAttribute("aria-pressed") !== "true";
+    b.disabled = true;
+    let error;
+    if (on) ({ error } = await sb.from("seasonal_themes").insert({ theme: k, starts_on: day, ends_on: "2099-12-31" }));
+    else {
+      // end every live period: one that started today is deleted, an older one ends yesterday
+      ({ error } = await sb.from("seasonal_themes").delete().eq("theme", k).eq("starts_on", day));
+      if (!error) ({ error } = await sb.from("seasonal_themes").update({ ends_on: addDays(day, -1) }).eq("theme", k).lt("starts_on", day).gte("ends_on", day));
+    }
+    if (error) { b.disabled = false; return fail(error); }
+    toast(`${SEASONS[k].name} ${on ? "is on" : "is off"}`); refreshSeason(); route();
+  }));
   $$("[data-new-theme]").forEach((b) => (b.onclick = () => {
     const k = b.dataset.newTheme, [d1, d2] = DEFAULTS[k];
     const s = openSheet(`Schedule ${SEASONS[k].name}`, `
-      <div class="grid g2"><label>From<input type="date" id="tStart" value="${d1}"></label><label>To<input type="date" id="tEnd" value="${d2}"></label></div>
-      <p class="muted">${k === "tet" ? "Tết moves every year: check the lunar calendar date." : k === "birthday" ? "While this is on, anyone whose birthday falls in the period gets the party look that day." : "Everyone sees the Christmas look in these dates."}</p>
-      <button class="primary block" id="tSave">Turn on for this period</button>`);
+      <div class="date-range">
+        <label class="date-field"><span>From</span><b data-show="a"></b><input type="date" id="tStart" value="${d1}"></label>
+        <span class="date-arrow" aria-hidden="true">${sv('<path d="M5 12h14M13 6l6 6-6 6"/>')}</span>
+        <label class="date-field"><span>To</span><b data-show="z"></b><input type="date" id="tEnd" value="${d2}"></label>
+      </div>
+      <div class="chips">
+        <button type="button" class="chip" data-len="3">3 days</button><button type="button" class="chip" data-len="7">1 week</button><button type="button" class="chip" data-len="14">2 weeks</button><button type="button" class="chip" data-len="30">1 month</button>
+      </div>
+      <p class="muted" id="tInfo"></p>
+      <button class="primary block" id="tSave">Schedule</button>`);
+    const A = s.el.querySelector("#tStart"), Z = s.el.querySelector("#tEnd");
+    const sync = () => {
+      s.el.querySelector('[data-show="a"]').textContent = nice(A.value);
+      s.el.querySelector('[data-show="z"]').textContent = nice(Z.value);
+      const n = A.value && Z.value ? Math.round((new Date(Z.value) - new Date(A.value)) / 864e5) + 1 : 0;
+      s.el.querySelector("#tInfo").textContent = n > 0 ? `${n} day${n === 1 ? "" : "s"}. ${k === "tet" ? "Tết moves every year: check the lunar calendar." : k === "birthday" ? "Anyone with a birthday in these dates gets the party look on their day." : "Everyone sees the Christmas look."}` : "End date must be on or after the start.";
+    };
+    A.onchange = () => { if (Z.value < A.value) Z.value = A.value; sync(); }; Z.onchange = sync; sync();
+    s.el.querySelectorAll("[data-len]").forEach((c) => (c.onclick = () => { Z.value = addDays(A.value || day, +c.dataset.len - 1); sync(); }));
     s.el.querySelector("#tSave").onclick = async () => {
-      const a = s.el.querySelector("#tStart").value, z = s.el.querySelector("#tEnd").value;
-      if (!a || !z || z < a) return toast("End date must be on or after the start");
-      const { error } = await sb.from("seasonal_themes").insert({ theme: k, starts_on: a, ends_on: z });
+      if (!A.value || !Z.value || Z.value < A.value) return toast("End date must be on or after the start");
+      const { error } = await sb.from("seasonal_themes").insert({ theme: k, starts_on: A.value, ends_on: Z.value });
       if (error) return fail(error);
       s.close(); toast(`${SEASONS[k].name} scheduled`); refreshSeason(); route();
     };
