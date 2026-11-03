@@ -392,3 +392,29 @@ main:has(.save-bar:not([hidden])) { padding-bottom: 200px; }
 .date-field input{position:absolute;inset:0;opacity:0;width:100%;height:100%;min-height:0;border:0;padding:0}
 .date-arrow{display:grid;place-items:center;color:var(--muted)}
 .date-arrow .ic{width:18px;height:18px}
+
+/* ---------- floating glass tab bar (iOS-style) ---------- */
+nav#tabs{left:12px;right:12px;bottom:calc(8px + env(safe-area-inset-bottom));max-width:456px;margin:0 auto;padding:6px;border:1px solid color-mix(in srgb,var(--card) 60%,transparent);border-radius:30px;z-index:5;
+  background:color-mix(in srgb,var(--card) 74%,transparent);-webkit-backdrop-filter:blur(22px) saturate(180%);backdrop-filter:blur(22px) saturate(180%);
+  box-shadow:0 10px 30px rgba(40,25,10,.14),0 1px 0 rgba(255,255,255,.55) inset}
+nav#tabs a{position:relative;border-radius:22px;min-height:52px;padding:6px 0;transition:color .2s ease,background-color .25s ease}
+nav#tabs a:not(.snap-btn).active{background:color-mix(in srgb,var(--burn) 12%,transparent);color:var(--burn-ink)}
+nav#tabs a:not(.snap-btn).active .ic{transform:translateY(-1px) scale(1.06)}
+nav#tabs .ic{transition:transform .25s cubic-bezier(.3,1.5,.6,1)}
+nav#tabs .snap-btn{width:60px;height:60px;margin-top:-30px;border:4px solid var(--cream);box-shadow:0 8px 20px color-mix(in srgb,var(--burn) 40%,transparent)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) nav#tabs{box-shadow:0 10px 30px rgba(0,0,0,.5),0 1px 0 rgba(255,255,255,.06) inset;border-color:rgba(255,255,255,.06)}}
+:root[data-theme="dark"] nav#tabs{box-shadow:0 10px 30px rgba(0,0,0,.5),0 1px 0 rgba(255,255,255,.06) inset;border-color:rgba(255,255,255,.06)}
+#toast{bottom:calc(100px + env(safe-area-inset-bottom))}
+
+/* Christmas: fresh snow settled on the tab bar */
+:root[data-season="christmas"] nav#tabs::before{content:"";position:absolute;left:14px;right:14px;top:-7px;height:12px;pointer-events:none;
+  background:radial-gradient(14px 9px at 8% 100%,#fff 98%,transparent),radial-gradient(20px 11px at 24% 100%,#fff 98%,transparent),radial-gradient(12px 8px at 70% 100%,#fff 98%,transparent),radial-gradient(22px 12px at 86% 100%,#fff 98%,transparent),radial-gradient(16px 8px at 48% 100%,#fff 98%,transparent),linear-gradient(#fff,#fff) bottom/100% 4px no-repeat;border-radius:6px;
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.12))}
+:root[data-season="tet"] nav#tabs{border-color:color-mix(in srgb,#F2B705 55%,transparent)}
+:root[data-season="birthday"] nav#tabs{border-color:color-mix(in srgb,#E5599F 45%,transparent)}
+
+/* canvas particles replace the old CSS spans */
+#season-fx canvas{position:absolute;inset:0;width:100%;height:100%}
+.save-bar{bottom:calc(92px + env(safe-area-inset-bottom))}
+
+:root[data-season="christmas"] nav#tabs::before{filter:drop-shadow(0 -1px 0 rgba(150,185,225,.9)) drop-shadow(0 2px 3px rgba(80,120,170,.25))}

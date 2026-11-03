@@ -1701,12 +1701,67 @@ function applySeason() {
   const root = document.documentElement;
   if (t) root.dataset.season = t; else root.removeAttribute("data-season");
   let fx = document.getElementById("season-fx");
-  if (!t) { fx?.remove(); return; }
+  if (!t) { fx?._stop?.(); fx?.remove(); return; }
   if (!fx) { fx = document.createElement("div"); fx.id = "season-fx"; fx.setAttribute("aria-hidden", "true"); document.body.appendChild(fx); }
-  if (fx.dataset.t !== t) {
-    fx.dataset.t = t;
-    fx.innerHTML = Array.from({ length: 14 }, (_, i) => `<i style="left:${(i * 7.3 + (i % 3) * 3) % 100}%;animation-delay:${-(i * 1.7) % 12}s;animation-duration:${9 + (i % 5) * 1.6}s;--s:${0.6 + (i % 4) * 0.25}"></i>`).join("");
-  }
+  if (fx.dataset.t !== t) { fx.dataset.t = t; startParticles(fx, t); }
+}
+// Falling particles on a canvas: real six-armed snowflakes with depth, hoa mai petals for Tết, confetti for birthdays.
+function startParticles(fx, t) {
+  fx._stop?.();
+  fx.innerHTML = "";
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const cv = document.createElement("canvas"); fx.appendChild(cv);
+  const ctx = cv.getContext("2d");
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  let W = 0, H = 0;
+  const size = () => { W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); };
+  size(); addEventListener("resize", size);
+  const N = t === "christmas" ? 46 : 26;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  // on a light background pure white snow disappears: use icy blue there, white in dark mode
+  const darkBg = (() => { const m = getComputedStyle(document.body).backgroundColor.match(/\d+/g); return m ? (+m[0] + +m[1] + +m[2]) / 3 < 100 : false; })();
+  const ICE = darkBg ? "255,255,255" : "150,185,225", ICE2 = darkBg ? "255,255,255" : "120,160,210";
+  const CONF = ["#7B5CE0", "#E5599F", "#F2B705", "#2FB5A3", "#FF7A5E"];
+  const make = (top) => {
+    const z = Math.random(); // depth: 0 far … 1 near
+    return { x: rnd(0, W), y: top ? rnd(-H, 0) : rnd(0, H), z, r: t === "christmas" ? 1.2 + z * (z > .7 ? 7 : 2.4) : 4 + z * 5,
+      vy: .25 + z * .9, ph: rnd(0, 6.28), sw: rnd(.4, 1.2), rot: rnd(0, 6.28), vr: rnd(-.02, .02), c: CONF[(Math.random() * CONF.length) | 0], crystal: z > .7 };
+  };
+  const P = Array.from({ length: N }, () => make(false));
+  const flake = (p) => {
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+    ctx.strokeStyle = `rgba(${ICE2},.95)`; ctx.lineWidth = 1.5; ctx.lineCap = "round";
+    ctx.shadowColor = darkBg ? "rgba(160,200,255,.6)" : "rgba(255,255,255,.9)"; ctx.shadowBlur = 3;
+    const r = p.r;
+    for (let i = 0; i < 6; i++) {
+      ctx.rotate(Math.PI / 3); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -r);
+      ctx.moveTo(0, -r * .55); ctx.lineTo(-r * .28, -r * .78); ctx.moveTo(0, -r * .55); ctx.lineTo(r * .28, -r * .78); ctx.stroke();
+    }
+    ctx.restore();
+  };
+  const dot = (p) => { ctx.beginPath(); ctx.fillStyle = `rgba(${ICE},${.4 + p.z * .5})`; ctx.shadowColor = darkBg ? "rgba(160,200,255,.5)" : "rgba(255,255,255,.8)"; ctx.shadowBlur = 2; ctx.arc(p.x, p.y, p.r, 0, 6.28); ctx.fill(); };
+  const petal = (p) => {
+    ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = "#F7C21B"; ctx.globalAlpha = .55 + p.z * .4;
+    for (let i = 0; i < 5; i++) { ctx.rotate(1.2566); ctx.beginPath(); ctx.ellipse(0, -p.r * .6, p.r * .38, p.r * .62, 0, 0, 6.28); ctx.fill(); }
+    ctx.fillStyle = "#D9480F"; ctx.beginPath(); ctx.arc(0, 0, p.r * .22, 0, 6.28); ctx.fill(); ctx.restore();
+  };
+  const confetti = (p) => { ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.scale(1, Math.cos(p.ph * 2)); ctx.fillStyle = p.c; ctx.globalAlpha = .85; ctx.fillRect(-p.r * .35, -p.r * .8, p.r * .7, p.r * 1.6); ctx.restore(); };
+  let raf = 0, last = performance.now();
+  const tick = (now) => {
+    const dt = Math.min(3, (now - last) / 16.7); last = now;
+    ctx.clearRect(0, 0, W, H);
+    const wind = Math.sin(now / 4000) * .35;
+    for (const p of P) {
+      p.ph += .012 * dt * p.sw; p.rot += p.vr * dt;
+      p.y += p.vy * dt * (t === "birthday" ? 1.4 : 1); p.x += (Math.sin(p.ph) * .5 * p.sw + wind * (.4 + p.z)) * dt;
+      if (p.y > H + 20 || p.x < -30 || p.x > W + 30) Object.assign(p, make(true), { y: -20 });
+      if (t === "christmas") (p.crystal ? flake : dot)(p); else if (t === "tet") petal(p); else confetti(p);
+    }
+    raf = requestAnimationFrame(tick);
+  };
+  const vis = () => { cancelAnimationFrame(raf); if (!document.hidden) { last = performance.now(); raf = requestAnimationFrame(tick); } };
+  document.addEventListener("visibilitychange", vis); vis();
+  fx._stop = () => { cancelAnimationFrame(raf); document.removeEventListener("visibilitychange", vis); removeEventListener("resize", size); };
 }
 async function refreshSeason() {
   const day = vnToday();
