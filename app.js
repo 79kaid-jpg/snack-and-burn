@@ -283,17 +283,17 @@ async function home(q) {
     <div class="ring-wrap">
       <div class="ring-center">
         <svg class="ring" viewBox="0 0 132 132" role="img" aria-label="Snacked ${n0(eaten)} of ${n0(budget + burned)} kcal, burned ${n0(burned)} of ${BURN_GOAL} kcal goal">
-          <circle cx="66" cy="66" r="58" stroke="#3A332D"/>
+          <circle cx="66" cy="66" r="58" stroke="var(--hero-track)"/>
           <circle cx="66" cy="66" r="58" stroke="var(--snack)" stroke-dasharray="${2 * Math.PI * 58}" stroke-dashoffset="${2 * Math.PI * 58 * (1 - Math.min(1, eaten / Math.max(1, budget + burned)))}"/>
-          <circle cx="66" cy="66" r="42" stroke="#3A332D"/>
-          <circle cx="66" cy="66" r="42" stroke="#FF6A4D" stroke-dasharray="${2 * Math.PI * 42}" stroke-dashoffset="${2 * Math.PI * 42 * (1 - Math.min(1, burned / BURN_GOAL))}"/>
+          <circle cx="66" cy="66" r="42" stroke="var(--hero-track)"/>
+          <circle cx="66" cy="66" r="42" stroke="var(--burn-2)" stroke-dasharray="${2 * Math.PI * 42}" stroke-dashoffset="${2 * Math.PI * 42 * (1 - Math.min(1, burned / BURN_GOAL))}"/>
         </svg>
         <div class="label"><b>${n0(Math.abs(left))}</b><span class="muted">${left >= 0 ? "kcal left" : "kcal over"}</span></div>
       </div>
       <div class="legend">
         <div><span class="dot" style="background:var(--snack)"></span><div><div class="muted">Snacked</div><b>${n0(eaten)}</b></div></div>
-        <div><span class="dot" style="background:#FF6A4D"></span><div><div class="muted">Burned</div><b>${n0(burned)}</b> <span class="muted">/ ${BURN_GOAL}</span></div></div>
-        <div><span class="dot" style="background:#E8D9C2"></span><div><div class="muted">Budget</div><b>${n0(budget)}</b></div></div>
+        <div><span class="dot" style="background:var(--burn-2)"></span><div><div class="muted">Burned</div><b>${n0(burned)}</b> <span class="muted">/ ${BURN_GOAL}</span></div></div>
+        <div><span class="dot" style="background:var(--border)"></span><div><div class="muted">Budget</div><b>${n0(budget)}</b></div></div>
       </div>
     </div>
     <button class="body-burn" id="bodyBurn" aria-label="How your body burns calories">
@@ -334,7 +334,7 @@ async function home(q) {
       ${days.map((x) => { const max = Math.max(profile.budget_kcal * 1.3, ...days.map((y) => y.eat)); const net = x.eat - x.burn; const over = net > profile.budget_kcal;
         return `<div class="wcol"><div class="wbar"><span class="weat" style="height:${(x.eat / max) * 100}%;background:${over ? "var(--burn)" : "var(--snack)"}"></span><span class="wburn" style="height:${(x.burn / max) * 100}%"></span><i style="bottom:${(profile.budget_kcal / max) * 100}%"></i></div><span class="muted">${x.d.toLocaleDateString("en-GB", { weekday: "narrow" })}</span></div>`; }).join("")}
     </div>
-    <div class="row muted" style="justify-content:flex-start;gap:14px;font-size:12px"><span><span class="dot" style="background:var(--snack);display:inline-block"></span> Eaten</span><span><span class="dot" style="background:#FF6A4D;display:inline-block"></span> Burned</span><span>— Budget</span></div>
+    <div class="row muted" style="justify-content:flex-start;gap:14px;font-size:12px"><span><span class="dot" style="background:var(--snack);display:inline-block"></span> Eaten</span><span><span class="dot" style="background:var(--burn-2);display:inline-block"></span> Burned</span><span>— Budget</span></div>
   </section>
 
   ${myCh ? `<a class="card row" href="#challenges" style="text-decoration:none;color:inherit">
@@ -443,6 +443,7 @@ const BADGE_IC = {
   people: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/>',
   trophy: '<path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM17 5h3v2a3 3 0 0 1-3 3M7 5H4v2a3 3 0 0 0 3 3"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+  moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
   heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
   crown: '<path d="M3 8l4 4 5-7 5 7 4-4-2 11H5z"/>',
   moon: '<path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>',
@@ -452,13 +453,13 @@ const BADGE_IC = {
 };
 const badgeSvg = (b, size = 30) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${BADGE_IC[b.icon] || BADGE_IC.star}</svg>`;
 const badgeTile = (b, i) => `<button class="badge-tile${b.earned_at ? "" : " locked"}" data-badge="${i}" aria-label="${esc(b.name)}${b.earned_at ? "" : " (locked)"}">
-  <span class="badge-coin" style="background:${b.earned_at ? b.color : "#EDE9E3"}">${badgeSvg(b)}</span>
+  <span class="badge-coin" style="background:${b.earned_at ? b.color : "var(--surface-2)"}">${badgeSvg(b)}</span>
   <span class="badge-name">${esc(b.name)}</span></button>`;
 function wireBadgeTiles(list, root = app) {
   root.querySelectorAll("[data-badge]").forEach((el) => (el.onclick = () => {
     const b = list[+el.dataset.badge];
     openSheet(b.name, `<div class="center stack" style="align-items:center">
-      <span class="badge-coin big" style="background:${b.earned_at ? b.color : "#EDE9E3"}">${badgeSvg(b, 56)}</span>
+      <span class="badge-coin big" style="background:${b.earned_at ? b.color : "var(--surface-2)"}">${badgeSvg(b, 56)}</span>
       <p>${esc(b.description)}</p>
       ${b.note ? `<p class="quip">“${esc(b.note)}”</p>` : ""}
       <p class="muted">${b.earned_at ? `Earned ${new Date(b.earned_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}` : b.kind === "gift" ? "A gift from the Snack & Burn team" : "Not earned yet. Keep going!"}</p>
@@ -788,7 +789,7 @@ async function snap() {
       <div class="row"><h1>Snap your meal</h1><span class="muted">Step 1 of 3</span></div>
       <label class="drop" for="cam">
         <span class="display" style="font-size:22px">Tap to take a photo</span>
-        <span class="muted" style="color:#E8D9C2">Shoot from above, in good light</span>
+        <span class="muted" style="color:var(--on-hero-muted)">Shoot from above, in good light</span>
       </label>
       <input id="cam" type="file" accept="image/*" capture="environment" hidden>
       <div class="row" style="justify-content:center"><label for="cam" class="shutter" aria-label="Take photo" role="button" tabindex="0"></label></div>
@@ -1191,7 +1192,7 @@ async function profileView() {
       <span class="avatar prof-av">${initial(profile.display_name)}</span>
       <div style="min-width:0">
         <h1 style="overflow-wrap:anywhere">${esc(profile.display_name)}</h1>
-        <p class="muted" style="color:#E8D9C2;overflow-wrap:anywhere">${esc(user.email)}${profile.is_admin ? " · Admin" : ""}</p>
+        <p class="muted" style="color:var(--on-hero-muted);overflow-wrap:anywhere">${esc(user.email)}${profile.is_admin ? " · Admin" : ""}</p>
       </div>
       <div class="prof-stats">
         <div><b>${bd.streak}</b><span>day streak</span></div>
@@ -1213,12 +1214,12 @@ async function profileView() {
 
     <h2 class="set-h">Reminders</h2>
     <div class="set-group">
-      ${row("rowNotif", "bell", "#FFF1D2", "Notifications", pushState())}
+      ${row("rowNotif", "bell", "var(--tint-snack)", "Notifications", pushState())}
     </div>
 
     <h2 class="set-h">Privacy &amp; preferences</h2>
     <div class="set-group">
-      ${row("rowNearby", "pin", "#E7F1FB", "Show me nearby", visLabel)}
+      ${row("rowNearby", "pin", "var(--tint-info)", "Show me nearby", visLabel)}
       <div class="set-row">
         <span class="set-ic" style="background:var(--tint-snack)">${ic("smile", "ic-sm")}</span>
         <span class="set-t">Serious mode<span class="muted" style="display:block;font-size:12px">${profile.serious_mode ? "No jokes, just numbers" : "Cheeky comments on"}</span></span>
@@ -1228,10 +1229,11 @@ async function profileView() {
 
     <h2 class="set-h">Account</h2>
     <div class="set-group">
-      ${row("rowBadges", "star", "#FFF1D2", "Badges", "")}
-      ${row("rowPw", "lock", "#EDE9E3", "Password", "Change")}
+      ${row("rowBadges", "star", "var(--tint-snack)", "Badges", "")}
+      ${row("rowPw", "lock", "var(--surface-2)", "Password", "Change")}
+      ${row("rowTheme", "moon", "var(--tint-purple)", "Appearance", { auto: "Auto", light: "Light", dark: "Dark" }[themePref()])}
       ${row("rowInstall", "phone", "var(--tint-ok)", "Add to Home Screen", "")}
-      ${profile.is_admin ? row("rowAdmin", "shield", "#EFEDFF", "Admin", "") : ""}
+      ${profile.is_admin ? row("rowAdmin", "shield", "var(--tint-purple)", "Admin", "") : ""}
     </div>
 
     <button class="set-row set-out" id="out">${ic("out", "ic-sm")}<span>Sign out</span></button>
@@ -1306,6 +1308,12 @@ async function profileView() {
   };
 
   $("#rowInstall").onclick = () => showInstallGuide(true);
+  $("#rowTheme").onclick = () => {
+    const cur = themePref();
+    const s = openSheet("Appearance", `<div class="set-group">${[["auto", "Auto", "Follow my iPhone (light by day, dark at night)"], ["light", "Light", "Always light"], ["dark", "Dark", "Always dark"]]
+      .map(([v, t, d]) => `<button class="set-row" data-theme-pick="${v}" role="radio" aria-checked="${cur === v}"><span class="set-t">${t}<span class="muted" style="display:block;font-size:12px">${d}</span></span>${cur === v ? `<span class="ok">${sv('<path d="M5 12l5 5 9-10"/>')}</span>` : ""}</button>`).join("")}</div>`);
+    s.el.querySelectorAll("[data-theme-pick]").forEach((b) => (b.onclick = () => { applyTheme(b.dataset.themePick); s.close(); route(); }));
+  };
   $("#rowBadges").onclick = () => { location.hash = "#badges"; };
   $("#rowNotif").onclick = () => openNotifSheet();
   const ad = $("#rowAdmin"); if (ad) ad.onclick = () => { location.hash = "#admin"; };
@@ -1336,8 +1344,8 @@ async function admin() {
         <svg viewBox="0 0 ${w} ${h + 16}" width="100%" role="img" aria-label="${label} per day">
           ${days.map((d, i) => { const v = Number(d[key]); const bh = (v / max) * h;
             return `<rect x="${i * bw + 2}" y="${h - bh}" width="${bw - 4}" height="${Math.max(bh, v ? 2 : 0)}" rx="3" fill="${color}"><title>${d.day}: ${fmt(v)}</title></rect>`; }).join("")}
-          <text x="0" y="${h + 14}" font-size="10" fill="#5C5348">${days[0].day.slice(5)}</text>
-          <text x="${w}" y="${h + 14}" font-size="10" fill="#5C5348" text-anchor="end">${days[days.length - 1].day.slice(5)}</text>
+          <text x="0" y="${h + 14}" font-size="10" fill="var(--muted)">${days[0].day.slice(5)}</text>
+          <text x="${w}" y="${h + 14}" font-size="10" fill="var(--muted)" text-anchor="end">${days[days.length - 1].day.slice(5)}</text>
         </svg></div>`;
     };
     body = `
@@ -1345,7 +1353,7 @@ async function admin() {
         <div class="tile" style="background:var(--tint-snack)"><b>${users.length}</b>Total users</div>
         <div class="tile" style="background:var(--tint-ok)"><b>${days.length ? days[days.length - 1].active : 0}</b>Active today</div>
         <div class="tile" style="background:var(--tint-burn)"><b>${n0(sum("meals"))}</b>Meals · 14 days</div>
-        <div class="tile" style="background:#E7F1FB"><b>${n1(sum("km"))}</b>km run · 14 days</div>
+        <div class="tile" style="background:var(--tint-info)"><b>${n1(sum("km"))}</b>km run · 14 days</div>
       </div>
       ${chart("active", "#1D7A43", "Active users")}
       ${chart("signups", "#FFB020", "New sign-ups")}
@@ -1608,6 +1616,17 @@ function wireAdminEvents() {
     try { await rpc("delete_official_challenge", { cid: b.dataset.delEv }); route(); } catch (e) { fail(e); }
   }));
 }
+
+// ---------- THEME ----------
+function themePref() { try { return localStorage.getItem("snb_theme") || "auto"; } catch { return "auto"; } }
+function applyTheme(pref) {
+  try { localStorage.setItem("snb_theme", pref); } catch { /* ignore */ }
+  if (pref === "auto") document.documentElement.removeAttribute("data-theme"); else document.documentElement.dataset.theme = pref;
+  const dark = pref === "dark" || (pref === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#14110E" : "#FFF8EE");
+}
+applyTheme(themePref());
+matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => applyTheme(themePref()));
 
 // ---------- SHOW / HIDE PASSWORD ----------
 // Adds an eye button to every password field (sign-in, create account, change password).
