@@ -235,7 +235,7 @@ async function home(q) {
   const wk0 = new Date(); wk0.setHours(0, 0, 0, 0); wk0.setDate(wk0.getDate() - 6);
   const d60 = new Date(Date.now() - 60 * 864e5).toISOString().slice(0, 10);
   // everything Home needs, fetched in parallel (one round trip instead of several)
-  const [, wRes, meals, acts, streak, wkMeals, wkActs, chs] = await Promise.all([
+  const [, wRes, meals, acts, streak, wkMeals, wkActs, chs, wat] = await Promise.all([
     loadDishes(),
     sb.from("weights").select("day,kg").gte("day", d60).order("day"),
     sb.from("meals").select("*").gte("eaten_at", since).order("eaten_at"),
@@ -244,7 +244,9 @@ async function home(q) {
     sb.from("meals").select("kcal,eaten_at").gte("eaten_at", wk0.toISOString()),
     sb.from("activities").select("kcal,distance_km,kind,started_at").gte("started_at", wk0.toISOString()),
     sb.from("challenges").select("id,name,metric,ends_at,official").gt("ends_at", new Date().toISOString()).order("ends_at").limit(5),
+    sb.from("water_logs").select("glasses").eq("day", vnToday()).maybeSingle(),
   ]);
+  const water = wat.data?.glasses ?? 0;
   const wts = wRes.data || [];
   // this week, per day
   const days = [...Array(7)].map((_, i) => { const d = new Date(wk0); d.setDate(d.getDate() + i); return { d, eat: 0, burn: 0 }; });
@@ -310,6 +312,8 @@ async function home(q) {
     <button class="quick" id="quickBurn"><span class="q-ic" style="background:var(--tint-burn)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5.3 1.5 1 2.5 2 3 0-3 0-5 1-8.5z"/></svg></span><span><b>Log a burn</b><span class="muted">Run, walk…</span></span></button>
   </div>
 
+  ${waterCard(water)}
+  ${new Date(Date.now() + 252e5).getUTCDate() <= 5 ? `<button class="month-promo" id="monthPromo">${sv('<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/>')}<span><b>Your month in review is ready</b><span class="muted">A card to share with friends</span></span>${sv('<path d="M9 6l6 6-6 6"/>')}</button>` : ""}
   <a class="coach-card" href="#coach">
     <span class="coach-av" aria-hidden="true">${COACH_FACE}</span>
     <span style="min-width:0;flex:1"><b>Coach</b><span class="muted coach-tip" id="coachTip">${esc(cachedTip() || "Your weekly check-in is ready. Tap to read.")}</span></span>
@@ -348,6 +352,8 @@ async function home(q) {
 
   $("#showLog").onclick = () => openBurnSheet();
   $("#quickBurn").onclick = () => openBurnSheet();
+  wireWater(water);
+  const mp = $("#monthPromo"); if (mp) mp.onclick = openMonthReport;
   $("#bodyBurn").onclick = () => openSheet("How your body burns calories", `
     <div class="burn-split">
       <div><b>${n0(restDay)}</b><span>Resting (BMR)</span><p class="muted">Breathing, heartbeat, staying warm. Burned even if you stay in bed all day.</p></div>
@@ -1180,6 +1186,7 @@ const ICON = {
   bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 20a2 2 0 0 0 4 0"/>',
   star: '<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
   chev: '<path d="M9 6l6 6-6 6"/>',
+  share: '<path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>',
 };
 const ic = (k, cls = "") => `<svg class="ic ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[k]}</svg>`;
 
@@ -1259,6 +1266,7 @@ async function profileView() {
     <h2 class="set-h">Account</h2>
     <div class="set-group">
       ${row("rowBadges", "star", "var(--tint-snack)", "Badges", "")}
+      ${row("rowMonth", "share", "var(--tint-info)", "Monthly report", "Share")}
       ${row("rowPw", "lock", "var(--surface-2)", "Password", "Change")}
       ${row("rowTheme", "moon", "var(--tint-purple)", "Appearance", { auto: "Auto", light: "Light", dark: "Dark" }[themePref()])}
       ${row("rowInstall", "phone", "var(--tint-ok)", "Add to Home Screen", "")}
@@ -1358,6 +1366,7 @@ async function profileView() {
     };
   };
   $("#rowBadges").onclick = () => { location.hash = "#badges"; };
+  $("#rowMonth").onclick = openMonthReport;
   $("#rowNotif").onclick = () => openNotifSheet();
   const ad = $("#rowAdmin"); if (ad) ad.onclick = () => { location.hash = "#admin"; };
   $("#serious").onclick = async () => {
@@ -1681,6 +1690,137 @@ function applyTheme(pref) {
 applyTheme(themePref());
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => applyTheme(themePref()));
 
+
+
+// ---------- WATER ----------
+const WATER_ML = 250;
+const waterGoal = () => Math.max(6, Math.min(12, Math.round((profile.weight_kg * 35) / WATER_ML)));
+function waterCard(glasses) {
+  const goal = waterGoal(), pct = Math.min(1, glasses / goal), C = 2 * Math.PI * 26;
+  return `<section class="water-card card" aria-label="Water today">
+    <div class="water-ring">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><circle cx="32" cy="32" r="26" class="wr-track"/><circle cx="32" cy="32" r="26" class="wr-fill" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - pct)}"/></svg>
+      <span class="wr-ic">${sv('<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>')}</span>
+    </div>
+    <div style="flex:1;min-width:0"><b id="wCount">${glasses} / ${goal} glasses</b>
+      <div class="muted" style="font-size:13px" id="wSub">${glasses >= goal ? "Goal reached. Nice!" : `${n0((goal - glasses) * WATER_ML)} ml to go`}</div></div>
+    <button class="icon-btn" id="wMinus" aria-label="Remove a glass" ${glasses ? "" : "disabled"}>${sv('<path d="M6 12h12"/>')}</button>
+    <button class="water-add" id="wAdd" aria-label="Add a glass of water">${sv('<path d="M12 5v14M5 12h14"/>')}<span>1 glass</span></button>
+  </section>`;
+}
+function wireWater(glasses) {
+  const goal = waterGoal();
+  const set = (g) => {
+    glasses = g; const C = 2 * Math.PI * 26;
+    $(".wr-fill").setAttribute("stroke-dashoffset", C * (1 - Math.min(1, g / goal)));
+    $("#wCount").textContent = `${g} / ${goal} glasses`;
+    $("#wSub").textContent = g >= goal ? "Goal reached. Nice!" : `${n0((goal - g) * WATER_ML)} ml to go`;
+    $("#wMinus").disabled = !g;
+  };
+  const go = async (d) => {
+    const before = glasses; set(Math.max(0, glasses + d));
+    if (d > 0) { navigator.vibrate?.(10); $(".water-ring").classList.remove("pop"); void $(".water-ring").offsetWidth; $(".water-ring").classList.add("pop"); if (glasses === goal) toast("Water goal done for today!"); }
+    try { set(await rpc("add_water", { p_day: vnToday(), p_delta: d })); } catch (e) { set(before); fail(e); }
+  };
+  $("#wAdd").onclick = () => go(1);
+  $("#wMinus").onclick = () => go(-1);
+}
+
+// ---------- MONTHLY REPORT (shareable card) ----------
+async function monthStats(y, m) {
+  const a = new Date(Date.UTC(y, m, 1) - 7 * 3600e3), z = new Date(Date.UTC(y, m + 1, 1) - 7 * 3600e3);
+  const ds = (d) => new Date(d.getTime() + 7 * 3600e3).toISOString().slice(0, 10);
+  const [ml, ac, wa] = await Promise.all([
+    sb.from("meals").select("kcal,eaten_at").gte("eaten_at", a.toISOString()).lt("eaten_at", z.toISOString()),
+    sb.from("activities").select("kind,distance_km,kcal,steps,started_at").gte("started_at", a.toISOString()).lt("started_at", z.toISOString()),
+    sb.from("water_logs").select("day,glasses").gte("day", ds(a)).lt("day", ds(z)),
+  ]);
+  const nDays = new Date(y, m + 1, 0).getDate();
+  const days = Array.from({ length: nDays }, () => ({ eat: 0, burn: 0, logged: false }));
+  const idx = (iso) => +ds(new Date(iso)).slice(8) - 1;
+  for (const x of ml.data ?? []) { const d = days[idx(x.eaten_at)]; if (d) { d.eat += x.kcal; d.logged = true; } }
+  for (const x of ac.data ?? []) { const d = days[idx(x.started_at)]; if (d) d.burn += x.kcal; }
+  const acts = ac.data ?? [];
+  return {
+    y, m, days,
+    km: acts.filter((x) => x.kind === "run").reduce((t, x) => t + Number(x.distance_km || 0), 0),
+    burned: acts.reduce((t, x) => t + x.kcal, 0),
+    steps: acts.reduce((t, x) => t + (x.steps || 0), 0),
+    meals: (ml.data ?? []).length,
+    onBudget: days.filter((d) => d.logged && d.eat - d.burn <= profile.budget_kcal).length,
+    logged: days.filter((d) => d.logged).length,
+    water: (wa.data ?? []).reduce((t, x) => t + x.glasses, 0),
+  };
+}
+async function drawMonthCard(st) {
+  await document.fonts?.load?.('700 80px "Fredoka"').catch(() => {});
+  const W = 1080, H = 1350, cv = document.createElement("canvas"); cv.width = W; cv.height = H;
+  const c = cv.getContext("2d");
+  const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, "#2A1A12"); g.addColorStop(.55, "#1A1A1A"); g.addColorStop(1, "#3A1610");
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+  // warm glow
+  const gl = c.createRadialGradient(880, 160, 0, 880, 160, 520); gl.addColorStop(0, "rgba(255,106,77,.45)"); gl.addColorStop(1, "rgba(255,106,77,0)");
+  c.fillStyle = gl; c.fillRect(0, 0, W, H);
+  const F = (w, s) => `${w} ${s}px Fredoka, Inter, system-ui, sans-serif`, I = (w, s) => `${w} ${s}px Inter, system-ui, sans-serif`;
+  const month = new Date(st.y, st.m, 1).toLocaleDateString("vi-VN", { month: "long", year: "numeric" });
+  c.fillStyle = "#FFB020"; c.font = F(700, 40); c.fillText("SNACK & BURN", 80, 130);
+  c.fillStyle = "#FFF8EE"; c.font = F(700, 96); c.fillText(month.replace(/^t/, "T"), 80, 250);
+  c.fillStyle = "#E8D9C2"; c.font = I(500, 40); c.fillText(`${profile.display_name} · tổng kết tháng`, 80, 316);
+  // tiles
+  const tiles = [
+    [n1(st.km), "km đã chạy", "#FF6A4D"], [n0(st.burned), "kcal đã đốt", "#FFB020"],
+    [`${st.onBudget}/${st.logged || 0}`, "ngày đúng ngân sách", "#5BD08A"], [st.steps ? n0(st.steps) : String(st.meals), st.steps ? "bước chân" : "bữa đã ghi", "#8CC2F2"],
+  ];
+  tiles.forEach(([v, l, col], i) => {
+    const x = 80 + (i % 2) * 470, y = 380 + Math.floor(i / 2) * 270;
+    c.fillStyle = "rgba(255,255,255,.07)"; c.beginPath(); c.roundRect(x, y, 440, 245, 36); c.fill();
+    c.fillStyle = col; c.beginPath(); c.roundRect(x + 40, y + 44, 56, 10, 5); c.fill();
+    c.fillStyle = "#FFF8EE"; c.font = F(700, v.length > 6 ? 84 : 104); c.fillText(v, x + 40, y + 160);
+    c.fillStyle = "#E8D9C2"; c.font = I(500, 36); c.fillText(l, x + 40, y + 210);
+  });
+  // daily strip: green = on budget, red = over, faint = not logged
+  const sx = 80, sy = 990, sw = W - 160, bw = sw / st.days.length;
+  c.fillStyle = "#E8D9C2"; c.font = I(600, 32); c.fillText("Từng ngày trong tháng", sx, sy - 24);
+  st.days.forEach((d, i) => {
+    c.fillStyle = !d.logged ? "rgba(255,255,255,.12)" : d.eat - d.burn <= profile.budget_kcal ? "#5BD08A" : "#FF6A4D";
+    c.beginPath(); c.roundRect(sx + i * bw + 3, sy, bw - 6, 90, 8); c.fill();
+  });
+  if (st.water) { c.fillStyle = "#8CC2F2"; c.font = I(600, 34); c.fillText(`${n0(st.water)} ly nước đã uống`, sx, sy + 150); }
+  c.fillStyle = "rgba(255,255,255,.1)"; c.fillRect(80, 1220, W - 160, 2);
+  c.fillStyle = "#FFF8EE"; c.font = F(700, 40); c.fillText("Ăn vui, đốt đều.", 80, 1290);
+  c.fillStyle = "#E8D9C2"; c.font = I(500, 30); c.textAlign = "right"; c.fillText("79kaid-jpg.github.io/snack-and-burn", W - 80, 1290);
+  return cv;
+}
+async function openMonthReport() {
+  const now = new Date(Date.now() + 7 * 3600e3);
+  // first 5 days of a month: show last month by default
+  let y = now.getUTCFullYear(), m = now.getUTCMonth();
+  if (now.getUTCDate() <= 5) { m -= 1; if (m < 0) { m = 11; y -= 1; } }
+  const s = openSheet("Monthly report", `<div class="month-nav"><button class="icon-btn" id="mPrev" aria-label="Previous month">${sv('<path d="M15 6l-6 6 6 6"/>')}</button><b id="mLbl"></b><button class="icon-btn" id="mNext" aria-label="Next month">${sv('<path d="M9 6l6 6-6 6"/>')}</button></div>
+    <div class="month-prev" id="mImg"><div class="skel" style="height:100%"></div></div>
+    <button class="primary block" id="mShare">${sv('<path d="M12 3v12M7 8l5-5 5 5M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5"/>')} Share to Zalo / Facebook</button>`);
+  let blob = null;
+  const load = async () => {
+    s.el.querySelector("#mLbl").textContent = new Date(y, m, 1).toLocaleDateString("vi-VN", { month: "long", year: "numeric" });
+    const cur = new Date(Date.now() + 7 * 3600e3); s.el.querySelector("#mNext").disabled = y === cur.getUTCFullYear() && m === cur.getUTCMonth();
+    s.el.querySelector("#mImg").innerHTML = `<div class="skel" style="height:100%"></div>`; blob = null;
+    const cv = await drawMonthCard(await monthStats(y, m));
+    blob = await new Promise((r) => cv.toBlob(r, "image/png"));
+    const img = new Image(); img.alt = "Monthly report card"; img.src = URL.createObjectURL(blob);
+    s.el.querySelector("#mImg").replaceChildren(img);
+  };
+  s.el.querySelector("#mPrev").onclick = () => { m -= 1; if (m < 0) { m = 11; y -= 1; } load(); };
+  s.el.querySelector("#mNext").onclick = () => { m += 1; if (m > 11) { m = 0; y += 1; } load(); };
+  s.el.querySelector("#mShare").onclick = async () => {
+    if (!blob) return;
+    const file = new File([blob], `snack-and-burn-${y}-${m + 1}.png`, { type: "image/png" });
+    const text = "Tháng này của mình trên Snack & Burn. Chơi cùng không?";
+    const url = `${location.origin}${location.pathname}?invite=${profile.invite_code}`;
+    if (navigator.canShare?.({ files: [file] })) { try { await navigator.share({ files: [file], text: `${text} ${url}` }); } catch { /* cancelled */ } }
+    else { const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = file.name; a.click(); toast("Image saved. Post it to Zalo or Facebook!"); }
+  };
+  load();
+}
 
 // ---------- HOLIDAY THEMES ----------
 // Admins schedule periods (table seasonal_themes). Christmas / Tết apply to everyone in the period;

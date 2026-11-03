@@ -418,3 +418,32 @@ nav#tabs .snap-btn{width:60px;height:60px;margin-top:-30px;border:4px solid var(
 .save-bar{bottom:calc(92px + env(safe-area-inset-bottom))}
 
 :root[data-season="christmas"] nav#tabs::before{filter:drop-shadow(0 -1px 0 rgba(150,185,225,.9)) drop-shadow(0 2px 3px rgba(80,120,170,.25))}
+
+/* ---------- water ---------- */
+.water-card{display:flex;flex-direction:row;align-items:center;gap:12px;padding:12px 14px}
+.water-ring{position:relative;width:52px;height:52px;flex:none}
+.water-ring svg{width:100%;height:100%;transform:rotate(-90deg)}
+.water-ring circle{fill:none;stroke-width:7;stroke-linecap:round}
+.wr-track{stroke:var(--tint-info)}
+.wr-fill{stroke:var(--info);transition:stroke-dashoffset .5s cubic-bezier(.3,1.3,.5,1)}
+.wr-ic{position:absolute;inset:0;display:grid;place-items:center;color:var(--info)}
+.wr-ic .ic{width:20px;height:20px}
+.water-ring.pop{animation:wpop .35s ease}
+@keyframes wpop{50%{transform:scale(1.12)}}
+.water-add{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 14px;border-radius:999px;border:0;background:var(--info);color:#fff;font:inherit;font-weight:600;font-size:14px}
+:root[data-theme="dark"] .water-add{color:#0F1A26}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .water-add{color:#0F1A26}}
+.water-add .ic{width:18px;height:18px}
+.icon-btn:disabled{opacity:.35}
+@media (prefers-reduced-motion:reduce){.water-ring.pop{animation:none}}
+
+/* ---------- monthly report ---------- */
+.month-promo{display:flex;align-items:center;gap:12px;padding:14px;border-radius:var(--r);border:0;background:var(--hero);color:var(--on-hero);font:inherit;text-align:left;min-height:44px}
+.month-promo>span{flex:1;display:flex;flex-direction:column}
+.month-promo .muted{color:var(--on-hero-muted);font-size:13px}
+.month-nav{display:flex;align-items:center;justify-content:space-between}
+.month-nav b{text-transform:capitalize}
+.month-prev{aspect-ratio:4/5;border-radius:18px;overflow:hidden;background:var(--line);max-height:52vh;margin:0 auto;width:100%;max-width:calc(52vh * .8)}
+.month-prev img{width:100%;height:100%;object-fit:cover;display:block}
+#mShare{display:inline-flex;align-items:center;justify-content:center;gap:8px}
+#mShare .ic{width:20px;height:20px}
