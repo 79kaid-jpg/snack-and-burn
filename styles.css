@@ -316,3 +316,43 @@ main:has(.save-bar:not([hidden])) { padding-bottom: 200px; }
 .kudos{background:var(--card);border:1px solid var(--border);color:var(--ink);border-radius:999px;padding:8px 14px;font:inherit;font-weight:600;min-height:44px}
 .kudos.on{background:var(--burn);border-color:var(--burn);color:var(--on-accent)}
 .kudos:active{transform:scale(.95)}
+
+/* ---------- holiday themes ---------- */
+:root[data-season="christmas"]{ --burn:#C62828; --burn-2:#E53935; --burn-ink:#A31515; --snack:#E0A526; --ok:#1B7A3E; --season-a:#1B7A3E; --season-b:#C62828; --season-tint:#E9F5EC; --fx:#FFFFFF; }
+:root[data-season="tet"]{ --burn:#D11F1F; --burn-2:#F04A3A; --burn-ink:#A8140F; --snack:#F2B705; --season-a:#D11F1F; --season-b:#F2B705; --season-tint:#FFF1D6; --fx:#F7C21B; }
+:root[data-season="birthday"]{ --burn:#C2338A; --burn-2:#E5599F; --burn-ink:#9B1E6C; --snack:#7B5CE0; --season-a:#7B5CE0; --season-b:#E5599F; --season-tint:#F6EAFB; --fx:#E5599F; }
+@media (prefers-color-scheme:dark){ :root:not([data-theme="light"])[data-season]{ --season-tint:#2A2026; } :root:not([data-theme="light"])[data-season="christmas"]{ --burn-ink:#FF8A80; } :root:not([data-theme="light"])[data-season="tet"]{ --burn-ink:#FF9B8A; } :root:not([data-theme="light"])[data-season="birthday"]{ --burn-ink:#FF9CCB; } }
+:root[data-theme="dark"][data-season]{ --season-tint:#2A2026; }
+:root[data-theme="dark"][data-season="christmas"]{ --burn-ink:#FF8A80; }
+:root[data-theme="dark"][data-season="tet"]{ --burn-ink:#FF9B8A; }
+:root[data-theme="dark"][data-season="birthday"]{ --burn-ink:#FF9CCB; }
+
+.season-banner{display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:var(--r);background:var(--season-tint);color:var(--ink);border:1px solid color-mix(in srgb,var(--season-a) 30%,transparent);font-size:14px;line-height:1.4;
+  background-image:linear-gradient(90deg,color-mix(in srgb,var(--season-a) 14%,transparent),color-mix(in srgb,var(--season-b) 14%,transparent))}
+.sb-ic{flex:none;display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:linear-gradient(135deg,var(--season-a,var(--burn)),var(--season-b,var(--snack)));color:#fff}
+.sb-ic .ic{width:20px;height:20px}
+.sb-ic.tp-christmas{--season-a:#1B7A3E;--season-b:#C62828}
+.sb-ic.tp-tet{--season-a:#D11F1F;--season-b:#F2B705}
+.sb-ic.tp-birthday{--season-a:#7B5CE0;--season-b:#E5599F}
+:root[data-season] #tabs .snap-btn{background:linear-gradient(135deg,var(--season-a),var(--season-b))}
+
+/* falling snow / hoa mai / confetti: decorative, never blocks taps */
+#season-fx{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:1}
+#season-fx i{position:absolute;top:-24px;width:calc(10px*var(--s));height:calc(10px*var(--s));opacity:.75;animation:fall linear infinite}
+[data-season="christmas"] #season-fx i{border-radius:50%;background:var(--fx);box-shadow:0 0 4px rgba(0,0,0,.15)}
+[data-season="tet"] #season-fx i{background:var(--fx);border-radius:60% 0 60% 0}
+[data-season="birthday"] #season-fx i{width:calc(6px*var(--s));height:calc(12px*var(--s));border-radius:2px;background:var(--fx)}
+[data-season="birthday"] #season-fx i:nth-child(3n){background:#7B5CE0}
+[data-season="birthday"] #season-fx i:nth-child(3n+1){background:#F2B705}
+@keyframes fall{to{transform:translate3d(30px,105vh,0) rotate(320deg)}}
+@media (prefers-reduced-motion:reduce){#season-fx{display:none}}
+
+/* admin theme picker */
+.theme-picks{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.theme-pick{display:flex;flex-direction:column;align-items:flex-start;gap:4px;padding:12px;border-radius:var(--r);border:1px solid var(--border);background:var(--card);color:var(--ink);font:inherit;text-align:left;min-height:44px}
+.theme-pick span{font-size:12px;color:var(--muted)}
+.theme-pick .tp-add{color:var(--burn-ink);font-weight:600;margin-top:4px}
+.theme-pick.tp-christmas .sb-ic{--season-a:#1B7A3E;--season-b:#C62828}
+.theme-pick.tp-tet .sb-ic{--season-a:#D11F1F;--season-b:#F2B705}
+.theme-pick.tp-birthday .sb-ic{--season-a:#7B5CE0;--season-b:#E5599F}
+@media (max-width:360px){.theme-picks{grid-template-columns:1fr}}

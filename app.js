@@ -77,7 +77,7 @@ async function route() {
   user = data.session?.user ?? null;
   if (!user) { tabs.hidden = true; return login(); }
   if (!profile || profile.id !== user.id) {
-    const PCOLS = "id,display_name,sex,age,height_cm,weight_kg,activity,budget_kcal,visibility,serious_mode,invite_code,onboarded,is_admin,blocked,notify_meals,notify_burn,notify_challenge";
+    const PCOLS = "id,display_name,sex,age,height_cm,weight_kg,activity,budget_kcal,visibility,serious_mode,invite_code,onboarded,is_admin,blocked,notify_meals,notify_burn,notify_challenge,birthday";
     const fresh = sb.from("profiles").select(PCOLS).eq("id", user.id).single();
     let cached = null; try { cached = JSON.parse(localStorage.getItem("snb_profile") || "null"); } catch { /* ignore */ }
     if (cached && cached.id === user.id) {
@@ -95,6 +95,7 @@ async function route() {
       profile = p; saveProfile();
     }
     redeemInvite();
+    refreshSeason();
   }
   if (profile.blocked) {
     tabs.hidden = true;
@@ -275,6 +276,7 @@ async function home(q) {
   const time = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
   app.innerHTML = `
+  ${seasonBanner()}
   <div class="row">
     <div><p class="muted">${new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "short" })}</p><h1>Hi, ${esc(profile.display_name)}</h1></div>
     <span class="badge">${streak}-day streak</span>
@@ -1339,7 +1341,21 @@ async function profileView() {
     const cur = themePref();
     const s = openSheet("Appearance", `<div class="set-group">${[["auto", "Auto", "Follow my iPhone (light by day, dark at night)"], ["light", "Light", "Always light"], ["dark", "Dark", "Always dark"]]
       .map(([v, t, d]) => `<button class="set-row" data-theme-pick="${v}" role="radio" aria-checked="${cur === v}"><span class="set-t">${t}<span class="muted" style="display:block;font-size:12px">${d}</span></span>${cur === v ? `<span class="ok">${sv('<path d="M5 12l5 5 9-10"/>')}</span>` : ""}</button>`).join("")}</div>`);
+    s.el.insertAdjacentHTML("beforeend", `
+      <div class="set-group" style="margin-top:14px">
+        <label class="set-row"><span class="set-t">Holiday themes<span class="muted" style="display:block;font-size:12px">Christmas, Tết and your birthday decorations</span></span>
+          <input type="checkbox" role="switch" id="seasonOn" ${seasonOff() ? "" : "checked"}></label>
+      </div>
+      <label style="margin-top:14px">Your birthday<input type="date" id="bday" value="${esc(profile.birthday || "")}"></label>
+      <p class="muted">Only used to throw you a little party in the app on the day.</p>`);
     s.el.querySelectorAll("[data-theme-pick]").forEach((b) => (b.onclick = () => { applyTheme(b.dataset.themePick); s.close(); route(); }));
+    s.el.querySelector("#seasonOn").onchange = (e) => { try { localStorage.setItem("snb_season_off", e.target.checked ? "" : "1"); } catch { /* ignore */ } applySeason(); };
+    s.el.querySelector("#bday").onchange = async (e) => {
+      const v = e.target.value || null;
+      const { error } = await sb.from("profiles").update({ birthday: v }).eq("id", user.id);
+      if (error) return fail(error);
+      profile.birthday = v; saveProfile(); toast("Birthday saved"); refreshSeason();
+    };
   };
   $("#rowBadges").onclick = () => { location.hash = "#badges"; };
   $("#rowNotif").onclick = () => openNotifSheet();
@@ -1404,6 +1420,7 @@ async function admin() {
 
   if (adminTab === "dishes") body = await adminDishesBody();
   if (adminTab === "events") body = await adminEventsBody();
+  if (adminTab === "themes") body = await adminThemesBody();
 
   if (adminTab === "ai") {
     const [{ data: rows, error }, st] = await Promise.all([
@@ -1434,7 +1451,7 @@ async function admin() {
   app.innerHTML = `
     <div class="row"><h1>Admin</h1><a class="btn outline small" href="#profile">Done</a></div>
     <div class="seg" role="group" aria-label="Admin section">
-      ${[["stats", "Stats"], ["users", "Users"], ["dishes", "Dishes"], ["events", "Events"], ["ai", "AI"]].map(([k, t]) => `<button aria-pressed="${adminTab === k}" data-at="${k}">${t}</button>`).join("")}
+      ${[["stats", "Stats"], ["users", "Users"], ["dishes", "Dishes"], ["events", "Events"], ["themes", "Themes"], ["ai", "AI"]].map(([k, t]) => `<button aria-pressed="${adminTab === k}" data-at="${k}">${t}</button>`).join("")}
     </div>
     ${body}`;
 
@@ -1467,6 +1484,7 @@ async function admin() {
   }));
   if (adminTab === "dishes") wireAdminDishes();
   if (adminTab === "events") wireAdminEvents();
+  if (adminTab === "themes") wireAdminThemes();
 }
 
 // ---------- ADMIN: DISHES ----------
@@ -1654,6 +1672,94 @@ function applyTheme(pref) {
 }
 applyTheme(themePref());
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => applyTheme(themePref()));
+
+
+// ---------- HOLIDAY THEMES ----------
+// Admins schedule periods (table seasonal_themes). Christmas / Tết apply to everyone in the period;
+// "birthday" turns on birthday parties in the period, shown to each user on their own birthday.
+const SEASONS = {
+  christmas: { name: "Christmas", vi: "Giáng sinh", banner: "Giáng sinh vui vẻ! Ăn bánh khúc cây xong nhớ đi bộ nha.",
+    icon: '<path d="M12 2l3 5h-2l3 5h-2l3 5H7l3-5H8l3-5H9z"/><path d="M12 17v4"/>' },
+  tet: { name: "Lunar New Year", vi: "Tết", banner: "Chúc mừng năm mới! Bánh chưng nhiều kcal lắm, đi chúc Tết bằng chân nhé.",
+    icon: '<path d="M12 4c2 3 2 5 0 8-2-3-2-5 0-8zM4 12c3-2 5-2 8 0-3 2-5 2-8 0zM20 12c-3-2-5-2-8 0 3 2 5 2 8 0zM12 20c-2-3-2-5 0-8 2 3 2 5 0 8z"/><circle cx="12" cy="12" r="1.5"/>' },
+  birthday: { name: "Birthday", vi: "Sinh nhật", banner: null,
+    icon: '<path d="M4 21h16v-7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2zM4 16c2 1.5 4 1.5 5.3 0 1.4 1.5 4 1.5 5.4 0 1.3 1.5 3.3 1.5 5.3 0M12 12V8M12 5.5c-.8-.7-.8-1.8 0-3 .8 1.2.8 2.3 0 3z"/>' },
+};
+const vnToday = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+function seasonOff() { try { return localStorage.getItem("snb_season_off") === "1"; } catch { return false; } }
+function currentSeason() { try { const c = JSON.parse(localStorage.getItem("snb_season") || "null"); return c && c.day === vnToday() ? c.theme : null; } catch { return null; } }
+function applySeason() {
+  const t = seasonOff() ? null : currentSeason();
+  const root = document.documentElement;
+  if (t) root.dataset.season = t; else root.removeAttribute("data-season");
+  let fx = document.getElementById("season-fx");
+  if (!t) { fx?.remove(); return; }
+  if (!fx) { fx = document.createElement("div"); fx.id = "season-fx"; fx.setAttribute("aria-hidden", "true"); document.body.appendChild(fx); }
+  if (fx.dataset.t !== t) {
+    fx.dataset.t = t;
+    fx.innerHTML = Array.from({ length: 14 }, (_, i) => `<i style="left:${(i * 7.3 + (i % 3) * 3) % 100}%;animation-delay:${-(i * 1.7) % 12}s;animation-duration:${9 + (i % 5) * 1.6}s;--s:${0.6 + (i % 4) * 0.25}"></i>`).join("");
+  }
+}
+async function refreshSeason() {
+  const day = vnToday();
+  const { data } = await sb.from("seasonal_themes").select("theme").lte("starts_on", day).gte("ends_on", day);
+  const on = new Set((data ?? []).map((r) => r.theme));
+  const bday = profile?.birthday && profile.birthday.slice(5) === day.slice(5);
+  const theme = on.has("birthday") && bday ? "birthday" : on.has("tet") ? "tet" : on.has("christmas") ? "christmas" : null;
+  const before = currentSeason();
+  try { localStorage.setItem("snb_season", JSON.stringify({ day, theme })); } catch { /* ignore */ }
+  applySeason();
+  if (before !== theme) route();
+}
+function seasonBanner() {
+  const t = seasonOff() ? null : currentSeason();
+  if (!t) return "";
+  const S = SEASONS[t];
+  const text = t === "birthday" ? `Chúc mừng sinh nhật, ${esc(profile.display_name)}! Hôm nay ăn bánh kem thoải mái, mai mình đốt sau.` : S.banner;
+  return `<div class="season-banner" role="note"><span class="sb-ic">${sv(S.icon)}</span><span>${text}</span></div>`;
+}
+applySeason();
+
+async function adminThemesBody() {
+  const { data, error } = await sb.from("seasonal_themes").select("*").order("starts_on", { ascending: false });
+  if (error) throw error;
+  const day = vnToday();
+  const fmtD = (d) => new Date(d + "T00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return `
+    <div class="row"><span class="muted">Holiday looks switch on by themselves in the dates you set (Vietnam time).</span></div>
+    <div class="theme-picks">${Object.entries(SEASONS).map(([k, S]) => `
+      <button class="theme-pick tp-${k}" data-new-theme="${k}"><span class="sb-ic">${sv(S.icon)}</span><b>${S.name}</b><span>${k === "birthday" ? "Each user, on their birthday" : "Everyone"}</span><span class="tp-add">+ Schedule</span></button>`).join("")}</div>
+    ${data.length ? `<div class="list">${data.map((r) => {
+      const st = day < r.starts_on ? "Upcoming" : day > r.ends_on ? "Ended" : "Live";
+      return `<div class="row"><div class="row" style="justify-content:flex-start"><span class="sb-ic tp-${r.theme}">${sv(SEASONS[r.theme].icon)}</span>
+        <div><b>${SEASONS[r.theme].name}</b><div class="muted">${fmtD(r.starts_on)} – ${fmtD(r.ends_on)}</div></div></div>
+        <div class="row" style="gap:8px"><span class="ev-chip ${st.toLowerCase()}">${st === "Live" ? "● " : ""}${st}</span><button class="outline small danger" data-del-theme="${r.id}" aria-label="Delete ${SEASONS[r.theme].name} period">Delete</button></div></div>`;
+    }).join("")}</div>` : `<div class="card center"><p class="muted">No holiday periods yet. Pick a theme above to schedule one.</p></div>`}`;
+}
+function wireAdminThemes() {
+  const year = +vnToday().slice(0, 4);
+  const DEFAULTS = { christmas: [`${year}-12-15`, `${year}-12-26`], tet: [`${year + 1}-02-10`, `${year + 1}-02-22`], birthday: [vnToday(), `${year}-12-31`] };
+  $$("[data-new-theme]").forEach((b) => (b.onclick = () => {
+    const k = b.dataset.newTheme, [d1, d2] = DEFAULTS[k];
+    const s = openSheet(`Schedule ${SEASONS[k].name}`, `
+      <div class="grid g2"><label>From<input type="date" id="tStart" value="${d1}"></label><label>To<input type="date" id="tEnd" value="${d2}"></label></div>
+      <p class="muted">${k === "tet" ? "Tết moves every year: check the lunar calendar date." : k === "birthday" ? "While this is on, anyone whose birthday falls in the period gets the party look that day." : "Everyone sees the Christmas look in these dates."}</p>
+      <button class="primary block" id="tSave">Turn on for this period</button>`);
+    s.el.querySelector("#tSave").onclick = async () => {
+      const a = s.el.querySelector("#tStart").value, z = s.el.querySelector("#tEnd").value;
+      if (!a || !z || z < a) return toast("End date must be on or after the start");
+      const { error } = await sb.from("seasonal_themes").insert({ theme: k, starts_on: a, ends_on: z });
+      if (error) return fail(error);
+      s.close(); toast(`${SEASONS[k].name} scheduled`); refreshSeason(); route();
+    };
+  }));
+  $$("[data-del-theme]").forEach((b) => (b.onclick = async () => {
+    if (!confirm("Delete this holiday period?")) return;
+    const { error } = await sb.from("seasonal_themes").delete().eq("id", b.dataset.delTheme);
+    if (error) return fail(error);
+    refreshSeason(); route();
+  }));
+}
 
 // ---------- SHOW / HIDE PASSWORD ----------
 // Adds an eye button to every password field (sign-in, create account, change password).
