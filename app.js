@@ -87,7 +87,7 @@ async function route() {
         if (!p) return;
         const changed = Object.keys(p).some((k) => String(p[k]) !== String(profile[k]));
         profile = p; saveProfile();
-        if (changed) { const y = window.scrollY; route().then(() => window.scrollTo(0, y)); }
+        if (changed) { const y = app.scrollTop; route().then(() => { app.scrollTop = y; }); }
       });
     } else {
       const { data: p, error } = await fresh;
@@ -112,7 +112,7 @@ async function route() {
   let snap = null; if (key === "home") { try { snap = localStorage.getItem("snb_home"); } catch { /* */ } }
   if (snap) app.innerHTML = `<div class="snapshot" aria-busy="true">${snap}</div>`; else app.innerHTML = `<div class="skel" style="height:36px;width:60%"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:64px"></div><div class="skel" style="height:64px"></div>`;
   try { await view(new URLSearchParams(query || "")); } catch (e) { fail(e); }
-  window.scrollTo(0, 0);
+  app.scrollTop = 0;
 }
 window.addEventListener("hashchange", route);
 sb.auth.onAuthStateChange((evt) => { if (evt === "SIGNED_IN" || evt === "SIGNED_OUT") { profile = null; route(); } });
@@ -879,7 +879,7 @@ async function snap() {
     $$("[data-rm]").forEach((b) => (b.onclick = () => { s.items.splice(+b.dataset.rm, 1); route(); }));
     const add = $("#add"), nameIn = $("#addName"), kcalIn = $("#addKcal");
     // re-render in place without jumping to the top
-    const rerender = () => { const y = window.scrollY; route().then(() => window.scrollTo(0, y)); };
+    const rerender = () => { const y = app.scrollTop; route().then(() => { app.scrollTop = y; }); };
     $$("[data-menu]").forEach((b) => (b.onclick = () => { const [n, k] = dl0[+b.dataset.menu]; s.items.push({ name: n, kcal: k, size: "M" }); toast(`${n} added`); route(); }));
     const fill = () => { const hit = dl0.find(([d]) => d.toLowerCase() === nameIn.value.trim().toLowerCase()); if (hit) kcalIn.value = hit[1]; };
     nameIn.oninput = fill; nameIn.onchange = fill;
@@ -1163,7 +1163,7 @@ async function watchGuide() {
       <button class="outline" id="gBack" ${i ? "" : "disabled"}>Quay lại</button>
       <button class="primary" id="gNext">${i === STEPS.length - 1 ? "Xong" : "Đã làm, tiếp"}</button>
     </div>`;
-  const go = (k) => { watchStep = k; watchGuide(); window.scrollTo(0, 0); };
+  const go = (k) => { watchStep = k; watchGuide(); app.scrollTop = 0; };
   $$("[data-go]").forEach((b) => (b.onclick = () => go(+b.dataset.go)));
   $("#gBack").onclick = () => go(i - 1);
   $("#gNext").onclick = () => {
@@ -1596,7 +1596,7 @@ async function admin() {
 
   $$("[data-at]").forEach((b) => (b.onclick = () => { adminTab = b.dataset.at; route(); }));
   $(".admin-tabs [aria-pressed=\"true\"]")?.scrollIntoView({ inline: "center", block: "nearest" });
-  $$("[data-metric]").forEach((b) => (b.onclick = () => { adminMetric = b.dataset.metric; const y = scrollY; route().then(() => scrollTo(0, y)); }));
+  $$("[data-metric]").forEach((b) => (b.onclick = () => { adminMetric = b.dataset.metric; const y = app.scrollTop; route().then(() => { app.scrollTop = y; }); }));
   const ai = $("#ai");
   if (ai) {
     $$("[data-prov]").forEach((b) => (b.onclick = () => {
